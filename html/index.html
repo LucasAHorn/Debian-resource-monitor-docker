@@ -1,0 +1,820 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Resource Monitor</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0b1220;
+      --panel: rgba(10, 18, 32, 0.84);
+      --panel-border: rgba(148, 163, 184, 0.14);
+      --panel-strong: rgba(148, 163, 184, 0.22);
+      --text: #e5eefb;
+      --muted: #90a3bf;
+      --good: #22c55e;
+      --warn: #f59e0b;
+      --danger: #ef4444;
+      --info: #38bdf8;
+      --paused: #a78bfa;
+      --shadow: 0 24px 60px rgba(2, 6, 23, 0.42);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+      background:
+        radial-gradient(circle at top left, rgba(56, 189, 248, 0.12), transparent 28%),
+        radial-gradient(circle at top right, rgba(34, 197, 94, 0.1), transparent 24%),
+        linear-gradient(180deg, #08101d 0%, #0b1220 52%, #0f172a 100%);
+      color: var(--text);
+    }
+
+    a {
+      color: inherit;
+      text-decoration: none;
+    }
+
+    button,
+    .link-button {
+      border: 1px solid transparent;
+      border-radius: 8px;
+      padding: 10px 14px;
+      min-width: 46px;
+      background: rgba(30, 41, 59, 0.95);
+      color: var(--text);
+      font-size: 0.95rem;
+      cursor: pointer;
+      transition: transform 140ms ease, border-color 140ms ease, background 140ms ease, opacity 140ms ease;
+    }
+
+    button[data-name][data-action] {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 46px;
+      min-width: 46px;
+      height: 46px;
+      padding: 0;
+      line-height: 1;
+      flex-shrink: 0;
+    }
+
+    button:hover:not(:disabled),
+    .link-button:hover {
+      transform: translateY(-1px);
+      border-color: var(--panel-strong);
+    }
+
+    button:disabled {
+      cursor: wait;
+      opacity: 0.6;
+    }
+
+    .page {
+      width: min(1180px, calc(100% - 32px));
+      margin: 32px auto;
+    }
+
+    .hero {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      gap: 24px;
+      margin-bottom: 24px;
+    }
+
+    .hero h1 {
+      margin: 0;
+      font-size: clamp(2rem, 4vw, 3.4rem);
+      font-weight: 700;
+    }
+
+    .hero p {
+      margin: 10px 0 0;
+      color: var(--muted);
+      max-width: 720px;
+      line-height: 1.5;
+    }
+
+    .timestamp {
+      color: var(--muted);
+      font-size: 0.95rem;
+      white-space: nowrap;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(12, minmax(0, 1fr));
+      gap: 18px;
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--panel-border);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(10px);
+    }
+
+    .section {
+      grid-column: span 12;
+      padding: 20px;
+    }
+
+    .section-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+
+    .section-header h2 {
+      margin: 0;
+      font-size: 1.15rem;
+    }
+
+    .section-header span {
+      color: var(--muted);
+      font-size: 0.92rem;
+    }
+
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    .metric-card,
+    .detail-card {
+      padding: 18px;
+      border: 1px solid var(--panel-border);
+      border-radius: 8px;
+      background: linear-gradient(180deg, rgba(15, 23, 42, 0.92), rgba(8, 15, 28, 0.92));
+    }
+
+    .metric-label {
+      color: var(--muted);
+      font-size: 0.82rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .metric-value {
+      margin-top: 10px;
+      font-size: 2rem;
+      font-weight: 700;
+    }
+
+    .metric-detail,
+    .row-subtitle,
+    .detail-meta {
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 0.95rem;
+      line-height: 1.45;
+    }
+
+    .usage-bar {
+      margin-top: 14px;
+      height: 10px;
+      border-radius: 999px;
+      background: rgba(30, 41, 59, 0.95);
+      overflow: hidden;
+      border: 1px solid rgba(148, 163, 184, 0.12);
+    }
+
+    .usage-fill {
+      height: 100%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, var(--info), var(--good));
+      transition: width 220ms ease;
+    }
+
+    .usage-fill.warn {
+      background: linear-gradient(90deg, var(--warn), #fb7185);
+    }
+
+    .usage-fill.danger {
+      background: linear-gradient(90deg, #fb7185, var(--danger));
+    }
+
+    .disk-list,
+    .container-list,
+    .detail-grid {
+      display: grid;
+      gap: 12px;
+    }
+
+    .disk-row,
+    .container-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
+      padding: 16px 18px;
+      border: 1px solid var(--panel-border);
+      border-radius: 8px;
+      background: rgba(15, 23, 42, 0.8);
+    }
+
+    .container-link {
+      display: block;
+      min-width: 0;
+      flex: 1;
+    }
+
+    .row-title {
+      font-size: 1rem;
+      font-weight: 600;
+    }
+
+    .row-title.inline {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .status-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 10px;
+      border-radius: 999px;
+      border: 1px solid var(--panel-strong);
+      background: rgba(15, 23, 42, 0.95);
+      color: var(--text);
+      font-size: 0.84rem;
+      white-space: nowrap;
+    }
+
+    .status-chip::before {
+      content: "";
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--warn);
+    }
+
+    .status-chip.running::before {
+      background: var(--good);
+      box-shadow: 0 0 12px rgba(34, 197, 94, 0.6);
+    }
+
+    .status-chip.stopped::before {
+      background: var(--danger);
+      box-shadow: 0 0 12px rgba(239, 68, 68, 0.45);
+    }
+
+    .status-chip.paused::before {
+      background: var(--paused);
+      box-shadow: 0 0 12px rgba(167, 139, 250, 0.45);
+    }
+
+    .container-actions,
+    .detail-actions,
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      flex-shrink: 0;
+    }
+
+    .play-button,
+    .resume-button {
+      background: rgba(8, 145, 178, 0.18);
+      border-color: rgba(56, 189, 248, 0.24);
+    }
+
+    .stop-button {
+      background: rgba(185, 28, 28, 0.18);
+      border-color: rgba(248, 113, 113, 0.24);
+    }
+
+    .pause-button {
+      background: rgba(124, 58, 237, 0.18);
+      border-color: rgba(167, 139, 250, 0.24);
+    }
+
+    .link-button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-color: rgba(56, 189, 248, 0.24);
+      background: rgba(8, 145, 178, 0.12);
+    }
+
+    .message {
+      margin-top: 14px;
+      min-height: 1.2em;
+      color: var(--muted);
+      font-size: 0.95rem;
+    }
+
+    .message.error {
+      color: #fca5a5;
+    }
+
+    .message.success {
+      color: #86efac;
+    }
+
+    .message.warning {
+      color: #fcd34d;
+    }
+
+    .detail-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .log-output {
+      margin: 0;
+      padding: 18px;
+      border-radius: 8px;
+      border: 1px solid var(--panel-border);
+      background: rgba(2, 6, 23, 0.9);
+      color: #dbeafe;
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+      font-size: 0.88rem;
+      line-height: 1.5;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      max-height: 560px;
+      overflow: auto;
+    }
+
+    .hidden {
+      display: none;
+    }
+
+    @media (max-width: 840px) {
+      .hero,
+      .disk-row,
+      .container-row,
+      .section-header,
+      .header-actions {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+
+      .metrics,
+      .detail-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .container-actions,
+      .detail-actions {
+        width: 100%;
+        justify-content: space-between;
+      }
+
+      .timestamp,
+      .status-chip {
+        white-space: normal;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <section class="hero">
+      <div>
+        <h1 id="heroTitle">Resource Monitor</h1>
+        <p id="heroSubtitle">Live host metrics and Docker container control for this Debian home server.</p>
+      </div>
+      <div id="timestamp" class="timestamp">Refreshing...</div>
+    </section>
+
+    <section id="dashboardView" class="grid">
+      <div class="panel section">
+        <div class="section-header">
+          <h2>System Overview</h2>
+          <span>Updates every 5 seconds</span>
+        </div>
+        <div class="metrics">
+          <article class="metric-card">
+            <div class="metric-label">CPU Utilization</div>
+            <div id="cpuValue" class="metric-value">--%</div>
+            <div id="cpuDetail" class="metric-detail">Waiting for data</div>
+            <div class="usage-bar"><div id="cpuBar" class="usage-fill" style="width: 0%"></div></div>
+          </article>
+          <article class="metric-card">
+            <div class="metric-label">Memory Utilization</div>
+            <div id="ramValue" class="metric-value">--%</div>
+            <div id="ramDetail" class="metric-detail">Waiting for data</div>
+            <div class="usage-bar"><div id="ramBar" class="usage-fill" style="width: 0%"></div></div>
+          </article>
+        </div>
+      </div>
+
+      <div class="panel section">
+        <div class="section-header">
+          <h2>Disk Space</h2>
+          <span>Used / total and remaining</span>
+        </div>
+        <div id="disks" class="disk-list"></div>
+      </div>
+
+      <div class="panel section">
+        <div class="section-header">
+          <h2>Docker Containers</h2>
+          <span>Open a container for logs and controls</span>
+        </div>
+        <div id="containers" class="container-list"></div>
+        <div id="dockerMessage" class="message"></div>
+      </div>
+    </section>
+
+    <section id="containerView" class="grid hidden">
+      <div class="panel section">
+        <div class="section-header">
+          <div>
+            <h2 id="detailTitle">Container</h2>
+            <span id="detailSubtitle">Loading container details</span>
+          </div>
+          <div class="header-actions">
+            <a href="/" class="link-button">Back to monitor</a>
+            <div id="detailStatus" class="status-chip">Unknown</div>
+          </div>
+        </div>
+        <div class="detail-grid">
+          <article class="detail-card">
+            <div class="metric-label">Container State</div>
+            <div id="detailState" class="metric-value">--</div>
+            <div id="detailMeta" class="detail-meta">Waiting for data</div>
+          </article>
+          <article class="detail-card">
+            <div class="metric-label">Image</div>
+            <div id="detailImage" class="metric-value" style="font-size: 1.3rem;">--</div>
+            <div id="detailPorts" class="detail-meta">Ports unavailable</div>
+          </article>
+        </div>
+        <div id="detailActions" class="detail-actions" style="margin-top: 16px;"></div>
+        <div id="detailMessage" class="message"></div>
+      </div>
+
+      <div class="panel section">
+        <div class="section-header">
+          <h2>Container Output</h2>
+          <span>Latest 200 log lines</span>
+        </div>
+        <pre id="detailLogs" class="log-output">Loading logs...</pre>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const apiBaseUrl = `${window.location.protocol}//${window.location.hostname}:5000`;
+    const refreshIntervalMs = 5000;
+    const pendingActions = new Set();
+    const protectedContainers = new Set(["dashboard-web", "resource-api"]);
+    const currentPath = decodeURIComponent(window.location.pathname.replace(/^\/+|\/+$/g, ""));
+    const currentContainer = currentPath || null;
+
+    function escapeHtml(value) {
+      return value
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll("\"", "&quot;")
+        .replaceAll("'", "&#39;");
+    }
+
+    function setTimestamp() {
+      document.getElementById("timestamp").innerText =
+        `Last refresh: ${new Date().toLocaleTimeString()}`;
+    }
+
+    function setMessage(targetId, text, type = "") {
+      const message = document.getElementById(targetId);
+      message.className = type ? `message ${type}` : "message";
+      message.innerText = text;
+    }
+
+    function fillClass(percent) {
+      if (percent >= 90) {
+        return "usage-fill danger";
+      }
+
+      if (percent >= 75) {
+        return "usage-fill warn";
+      }
+
+      return "usage-fill";
+    }
+
+    function updateBar(id, percent) {
+      const bar = document.getElementById(id);
+      bar.className = fillClass(percent);
+      bar.style.width = `${Math.max(0, Math.min(percent, 100))}%`;
+    }
+
+    function getStateClass(container) {
+      if (container.state === "paused" || (container.status || "").includes("Paused")) {
+        return "paused";
+      }
+
+      if (container.state === "running" || (container.status || "").startsWith("Up")) {
+        return "running";
+      }
+
+      return "stopped";
+    }
+
+    function getStateLabel(container) {
+      const stateClass = getStateClass(container);
+      if (stateClass === "paused") {
+        return "Paused";
+      }
+
+      if (stateClass === "running") {
+        return "Running";
+      }
+
+      return "Stopped";
+    }
+
+    function renderSystem(data) {
+      document.getElementById("cpuValue").innerText = `${data.cpu_percent}%`;
+      document.getElementById("cpuDetail").innerText = "Current host CPU usage";
+      updateBar("cpuBar", data.cpu_percent);
+
+      document.getElementById("ramValue").innerText = `${data.ram_percent}%`;
+      document.getElementById("ramDetail").innerText =
+        `${data.ram_used_gb} GB used of ${data.ram_total_gb} GB`;
+      updateBar("ramBar", data.ram_percent);
+    }
+
+    function renderDisks(disks) {
+      const diskList = document.getElementById("disks");
+      diskList.innerHTML = "";
+
+      disks.forEach(disk => {
+        const usedPercent = Number.parseInt(disk.percent_used, 10);
+        const row = document.createElement("article");
+        row.className = "disk-row";
+        row.innerHTML = `
+          <div style="flex: 1; min-width: 0;">
+            <div class="row-title">${escapeHtml(disk.path)}</div>
+            <div class="row-subtitle">${escapeHtml(disk.used_gb)} GB used of ${escapeHtml(disk.total_gb)} GB, ${escapeHtml(disk.available_gb)} GB remaining</div>
+            <div class="usage-bar"><div class="${fillClass(usedPercent)}" style="width: ${usedPercent}%"></div></div>
+          </div>
+          <div class="status-chip ${usedPercent < 80 ? "running" : usedPercent < 90 ? "" : "stopped"}">
+            ${escapeHtml(disk.percent_used)} used
+          </div>
+        `;
+        diskList.appendChild(row);
+      });
+    }
+
+    function containerActionMarkup(container) {
+      const stateClass = getStateClass(container);
+      const disabled = pendingActions.has(container.name) ? "disabled" : "";
+
+      if (stateClass === "paused") {
+        return `
+          <button class="resume-button" data-name="${escapeHtml(container.name)}" data-action="unpause" title="resume ${escapeHtml(container.name)}" ${disabled}>▶</button>
+          <button class="stop-button" data-name="${escapeHtml(container.name)}" data-action="stop" title="stop ${escapeHtml(container.name)}" ${disabled}>■</button>
+        `;
+      }
+
+      if (stateClass === "running") {
+        return `
+          <button class="pause-button" data-name="${escapeHtml(container.name)}" data-action="pause" title="pause ${escapeHtml(container.name)}" ${disabled}>⏸</button>
+          <button class="stop-button" data-name="${escapeHtml(container.name)}" data-action="stop" title="stop ${escapeHtml(container.name)}" ${disabled}>■</button>
+        `;
+      }
+
+      return `
+        <button class="play-button" data-name="${escapeHtml(container.name)}" data-action="start" title="start ${escapeHtml(container.name)}" ${disabled}>▶</button>
+      `;
+    }
+
+    function renderContainers(containers) {
+      const list = document.getElementById("containers");
+      list.innerHTML = "";
+
+      containers.forEach(container => {
+        const stateClass = getStateClass(container);
+        const row = document.createElement("article");
+        row.className = "container-row";
+        row.innerHTML = `
+          <a class="container-link" href="/${encodeURIComponent(container.name)}">
+            <div class="row-title inline">
+              <span>${escapeHtml(container.name)}</span>
+              <div class="status-chip ${stateClass}">${getStateLabel(container)}</div>
+            </div>
+            <div class="row-subtitle">${escapeHtml(container.status || container.state || "Unknown state")}</div>
+          </a>
+          <div class="container-actions">
+            ${containerActionMarkup(container)}
+          </div>
+        `;
+        list.appendChild(row);
+      });
+    }
+
+    function formatPorts(ports) {
+      const entries = Object.entries(ports || {});
+
+      if (!entries.length) {
+        return "No published ports";
+      }
+
+      return entries.map(([containerPort, bindings]) => {
+        if (!bindings || !bindings.length) {
+          return `${containerPort} unpublished`;
+        }
+
+        return bindings.map(binding => `${binding.HostIp}:${binding.HostPort} -> ${containerPort}`).join(", ");
+      }).join(" | ");
+    }
+
+    function renderDetail(container) {
+      const stateClass = getStateClass({
+        state: container.state.status,
+        status: container.state.paused ? "Paused" : container.state.status
+      });
+      const detailStatus = document.getElementById("detailStatus");
+      detailStatus.className = `status-chip ${stateClass}`;
+      detailStatus.innerText = getStateLabel({
+        state: container.state.status,
+        status: container.state.paused ? "Paused" : container.state.status
+      });
+
+      document.getElementById("detailTitle").innerText = container.name;
+      document.getElementById("detailSubtitle").innerText = "Container details and recent output";
+      document.getElementById("detailState").innerText = container.state.paused
+        ? "Paused"
+        : container.state.status;
+      document.getElementById("detailMeta").innerText =
+        `Started: ${container.state.started_at || "n/a"} | Exit code: ${container.state.exit_code}`;
+      document.getElementById("detailImage").innerText = container.config.image;
+      document.getElementById("detailImage").style.fontSize = "1.3rem";
+      document.getElementById("detailPorts").innerText = formatPorts(container.network.ports);
+      document.getElementById("detailLogs").innerText = container.logs || "No log output";
+
+      const actionContainer = document.getElementById("detailActions");
+      actionContainer.innerHTML = containerActionMarkup({
+        name: container.name,
+        state: container.state.paused ? "paused" : container.state.status,
+        status: container.state.paused ? "Paused" : container.state.status
+      });
+    }
+
+    async function loadResources() {
+      const res = await fetch(`${apiBaseUrl}/api/resources`);
+      const data = await res.json();
+      renderSystem(data);
+      renderDisks(data.disks || []);
+      setTimestamp();
+    }
+
+    async function loadContainers() {
+      const dockerRes = await fetch(`${apiBaseUrl}/api/docker`);
+      const containers = await dockerRes.json();
+
+      if (!Array.isArray(containers)) {
+        setMessage("dockerMessage", containers.detail || "Docker info unavailable", "error");
+        document.getElementById("containers").innerHTML = "";
+        return;
+      }
+
+      setMessage("dockerMessage", "");
+      renderContainers(containers);
+    }
+
+    async function loadContainerDetail() {
+      const res = await fetch(`${apiBaseUrl}/api/docker/${encodeURIComponent(currentContainer)}`);
+      const container = await res.json();
+
+      if (!res.ok) {
+        throw new Error(container.detail || "Container detail unavailable");
+      }
+
+      renderDetail(container);
+      setMessage("detailMessage", "");
+      setTimestamp();
+    }
+
+    async function loadDashboard() {
+      await Promise.all([loadResources(), loadContainers()]);
+    }
+
+    async function loadCurrentView() {
+      try {
+        if (currentContainer) {
+          await loadContainerDetail();
+        } else {
+          await loadDashboard();
+        }
+      } catch (error) {
+        setMessage(currentContainer ? "detailMessage" : "dockerMessage", `Refresh failed: ${error.message}`, "error");
+      }
+    }
+
+    function scheduleAlignedRefresh() {
+      const now = new Date();
+      let delayMs = ((5 - (now.getSeconds() % 5)) * 1000) - now.getMilliseconds();
+
+      if (delayMs <= 0) {
+        delayMs = refreshIntervalMs;
+      }
+
+      window.setTimeout(async () => {
+        await loadCurrentView();
+        scheduleAlignedRefresh();
+      }, delayMs);
+    }
+
+    function requiresStopConfirmation(name, action) {
+      return action === "stop" && protectedContainers.has(name);
+    }
+
+    function confirmAction(name, action) {
+      if (!requiresStopConfirmation(name, action)) {
+        return true;
+      }
+
+      return window.confirm(
+        `Stop ${name}? This container supports the monitor webpage, and stopping it will end webpage interactivity until the service is started again.`
+      );
+    }
+
+    async function handleContainerAction(name, action) {
+      if (!confirmAction(name, action)) {
+        setMessage(currentContainer ? "detailMessage" : "dockerMessage", "Stop cancelled.", "warning");
+        return;
+      }
+
+      pendingActions.add(name);
+      setMessage(
+        currentContainer ? "detailMessage" : "dockerMessage",
+        `${action.charAt(0).toUpperCase()}${action.slice(1)}ing ${name}...`
+      );
+      renderPendingButtonState(name);
+
+      try {
+        const response = await fetch(`${apiBaseUrl}/api/docker/${encodeURIComponent(name)}/${action}`, {
+          method: "POST"
+        });
+        const payload = await response.json();
+
+        if (!response.ok) {
+          throw new Error(payload.detail || "Docker action failed");
+        }
+
+        setMessage(
+          currentContainer ? "detailMessage" : "dockerMessage",
+          `${name} ${action} request completed.`,
+          "success"
+        );
+
+        await loadCurrentView();
+      } catch (error) {
+        setMessage(currentContainer ? "detailMessage" : "dockerMessage", error.message, "error");
+      } finally {
+        pendingActions.delete(name);
+        await loadCurrentView();
+      }
+    }
+
+    function renderPendingButtonState(name) {
+      document.querySelectorAll(`button[data-name="${CSS.escape(name)}"]`).forEach(button => {
+        button.disabled = true;
+      });
+    }
+
+    document.body.addEventListener("click", event => {
+      const button = event.target.closest("button[data-name][data-action]");
+      if (!button || button.disabled) {
+        return;
+      }
+
+      handleContainerAction(button.dataset.name, button.dataset.action);
+    });
+
+    if (currentContainer) {
+      document.getElementById("dashboardView").classList.add("hidden");
+      document.getElementById("containerView").classList.remove("hidden");
+      document.getElementById("heroTitle").innerText = currentContainer;
+      document.getElementById("heroSubtitle").innerText = "Container detail view with recent output and runtime controls.";
+    } else {
+      document.getElementById("dashboardView").classList.remove("hidden");
+      document.getElementById("containerView").classList.add("hidden");
+    }
+
+    loadCurrentView();
+    scheduleAlignedRefresh();
+  </script>
+</body>
+</html>
