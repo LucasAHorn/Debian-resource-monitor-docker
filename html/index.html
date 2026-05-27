@@ -148,7 +148,7 @@
 
     .metrics {
       display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
+      grid-template-columns: repeat(3, minmax(0, 1fr));
       gap: 16px;
     }
 
@@ -158,6 +158,20 @@
       border: 1px solid var(--panel-border);
       border-radius: 8px;
       background: linear-gradient(180deg, rgba(15, 23, 42, 0.92), rgba(8, 15, 28, 0.92));
+    }
+
+    .metric-card {
+      position: relative;
+    }
+
+    .metric-card.clickable {
+      cursor: pointer;
+      transition: transform 140ms ease, border-color 140ms ease, background 140ms ease;
+    }
+
+    .metric-card.clickable:hover {
+      transform: translateY(-1px);
+      border-color: var(--panel-strong);
     }
 
     .metric-label {
@@ -180,6 +194,60 @@
       color: var(--muted);
       font-size: 0.95rem;
       line-height: 1.45;
+    }
+
+    .metric-stats {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 14px;
+    }
+
+    .metric-stat {
+      padding: 10px 12px;
+      border-radius: 8px;
+      background: rgba(2, 6, 23, 0.42);
+      border: 1px solid rgba(148, 163, 184, 0.12);
+    }
+
+    .metric-stat-label {
+      color: var(--muted);
+      font-size: 0.74rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .metric-stat-value {
+      margin-top: 6px;
+      font-size: 1.02rem;
+      font-weight: 700;
+    }
+
+    .metric-graph {
+      margin-top: 16px;
+      padding-top: 16px;
+      border-top: 1px solid rgba(148, 163, 184, 0.12);
+    }
+
+    .metric-graph.hidden {
+      display: none;
+    }
+
+    .graph-canvas {
+      width: 100%;
+      height: 180px;
+      display: block;
+      border-radius: 10px;
+      background:
+        linear-gradient(180deg, rgba(2, 6, 23, 0.86), rgba(15, 23, 42, 0.55)),
+        radial-gradient(circle at top, rgba(56, 189, 248, 0.12), transparent 55%);
+      border: 1px solid rgba(148, 163, 184, 0.14);
+    }
+
+    .graph-caption {
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 0.9rem;
     }
 
     .usage-bar {
@@ -225,6 +293,10 @@
       background: rgba(15, 23, 42, 0.8);
     }
 
+    .container-row {
+      align-items: flex-start;
+    }
+
     .container-link {
       display: block;
       min-width: 0;
@@ -241,6 +313,40 @@
       align-items: center;
       gap: 10px;
       flex-wrap: wrap;
+    }
+
+    .container-summary {
+      margin-top: 12px;
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .container-metric {
+      padding: 12px;
+      border-radius: 8px;
+      border: 1px solid rgba(148, 163, 184, 0.12);
+      background: rgba(2, 6, 23, 0.36);
+    }
+
+    .container-metric-label {
+      color: var(--muted);
+      font-size: 0.74rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .container-metric-value {
+      margin-top: 7px;
+      font-size: 1rem;
+      font-weight: 700;
+    }
+
+    .container-metric-note {
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 0.85rem;
+      line-height: 1.4;
     }
 
     .status-chip {
@@ -371,6 +477,11 @@
         grid-template-columns: 1fr;
       }
 
+      .container-summary,
+      .metric-stats {
+        grid-template-columns: 1fr;
+      }
+
       .container-actions,
       .detail-actions {
         width: 100%;
@@ -398,20 +509,43 @@
       <div class="panel section">
         <div class="section-header">
           <h2>System Overview</h2>
-          <span>Updates every 5 seconds</span>
+          <span>Updates every 5 seconds, with 500 ms CPU sampling</span>
         </div>
         <div class="metrics">
-          <article class="metric-card">
+          <article id="cpuCard" class="metric-card clickable" role="button" tabindex="0" aria-expanded="false">
             <div class="metric-label">CPU Utilization</div>
             <div id="cpuValue" class="metric-value">--%</div>
-            <div id="cpuDetail" class="metric-detail">Waiting for data</div>
+            <div id="cpuDetail" class="metric-detail">Click to toggle the recent history graph</div>
             <div class="usage-bar"><div id="cpuBar" class="usage-fill" style="width: 0%"></div></div>
+            <div id="cpuGraphPanel" class="metric-graph hidden">
+              <canvas id="cpuGraph" class="graph-canvas" width="720" height="240"></canvas>
+              <div class="graph-caption">Last 6 minutes of CPU samples, captured from 500 ms snapshots.</div>
+            </div>
           </article>
           <article class="metric-card">
             <div class="metric-label">Memory Utilization</div>
             <div id="ramValue" class="metric-value">--%</div>
             <div id="ramDetail" class="metric-detail">Waiting for data</div>
             <div class="usage-bar"><div id="ramBar" class="usage-fill" style="width: 0%"></div></div>
+          </article>
+          <article class="metric-card">
+            <div class="metric-label">GPU Summary</div>
+            <div id="gpuValue" class="metric-value">--%</div>
+            <div id="gpuDetail" class="metric-detail">Waiting for GPU data</div>
+            <div class="metric-stats">
+              <div class="metric-stat">
+                <div class="metric-stat-label">GPU Util</div>
+                <div id="gpuUtilStat" class="metric-stat-value">--%</div>
+              </div>
+              <div class="metric-stat">
+                <div class="metric-stat-label">VRAM</div>
+                <div id="gpuVramStat" class="metric-stat-value">--</div>
+              </div>
+              <div class="metric-stat">
+                <div class="metric-stat-label">Mem Util</div>
+                <div id="gpuMemStat" class="metric-stat-value">--%</div>
+              </div>
+            </div>
           </article>
         </div>
       </div>
@@ -427,7 +561,7 @@
       <div class="panel section">
         <div class="section-header">
           <h2>Docker Containers</h2>
-          <span>Open a container for logs and controls</span>
+          <span>Bars are scaled against the current host CPU and RAM usage</span>
         </div>
         <div id="containers" class="container-list"></div>
         <div id="dockerMessage" class="message"></div>
@@ -479,6 +613,10 @@
     const protectedContainers = new Set(["dashboard-web", "resource-api"]);
     const currentPath = decodeURIComponent(window.location.pathname.replace(/^\/+|\/+$/g, ""));
     const currentContainer = currentPath || null;
+    const cpuHistory = [];
+    const cpuHistoryWindowMs = 6 * 60 * 1000;
+    let latestSystemData = null;
+    let cpuGraphExpanded = false;
 
     function escapeHtml(value) {
       return value
@@ -518,6 +656,205 @@
       bar.style.width = `${Math.max(0, Math.min(percent, 100))}%`;
     }
 
+    function formatPercent(value, digits = 1) {
+      const numericValue = Number(value);
+
+      if (!Number.isFinite(numericValue)) {
+        return "--";
+      }
+
+      return numericValue.toFixed(digits);
+    }
+
+    function clampPercent(value) {
+      const numericValue = Number(value);
+
+      if (!Number.isFinite(numericValue)) {
+        return 0;
+      }
+
+      return Math.max(0, Math.min(100, numericValue));
+    }
+
+    function formatGbPair(used, total) {
+      return `${used} GB / ${total} GB`;
+    }
+
+    function formatBytes(bytes) {
+      const numericValue = Number(bytes);
+
+      if (!Number.isFinite(numericValue) || numericValue <= 0) {
+        return "0 B";
+      }
+
+      const units = ["B", "KiB", "MiB", "GiB", "TiB"];
+      let size = numericValue;
+      let unitIndex = 0;
+
+      while (size >= 1024 && unitIndex < units.length - 1) {
+        size /= 1024;
+        unitIndex += 1;
+      }
+
+      return `${size >= 10 || unitIndex === 0 ? size.toFixed(0) : size.toFixed(1)} ${units[unitIndex]}`;
+    }
+
+    function toPercentOfUsed(value, usedTotal) {
+      const numericValue = Number(value);
+      const totalValue = Number(usedTotal);
+
+      if (!Number.isFinite(numericValue) || !Number.isFinite(totalValue) || totalValue <= 0) {
+        return 0;
+      }
+
+      return Math.max(0, Math.min(100, (numericValue / totalValue) * 100));
+    }
+
+    function pushCpuSample(percent) {
+      cpuHistory.push({
+        timestamp: Date.now(),
+        percent: clampPercent(percent)
+      });
+
+      const cutoff = Date.now() - cpuHistoryWindowMs;
+      while (cpuHistory.length > 1 && cpuHistory[0].timestamp < cutoff) {
+        cpuHistory.shift();
+      }
+    }
+
+    function resizeCanvasForDpr(canvas) {
+      const ratio = window.devicePixelRatio || 1;
+      const rect = canvas.getBoundingClientRect();
+      const width = Math.max(320, Math.floor(rect.width * ratio));
+      const height = Math.max(180, Math.floor(rect.height * ratio));
+
+      if (canvas.width !== width || canvas.height !== height) {
+        canvas.width = width;
+        canvas.height = height;
+      }
+
+      return { width, height, ratio };
+    }
+
+    function drawCpuGraph() {
+      const panel = document.getElementById("cpuGraphPanel");
+      const canvas = document.getElementById("cpuGraph");
+
+      if (panel.classList.contains("hidden")) {
+        return;
+      }
+
+      const context = canvas.getContext("2d");
+      const { width, height, ratio } = resizeCanvasForDpr(canvas);
+      const w = width / ratio;
+      const h = height / ratio;
+
+      context.setTransform(ratio, 0, 0, ratio, 0, 0);
+      context.clearRect(0, 0, w, h);
+
+      const left = 44;
+      const right = 14;
+      const top = 14;
+      const bottom = 28;
+      const chartWidth = w - left - right;
+      const chartHeight = h - top - bottom;
+
+      context.strokeStyle = "rgba(148, 163, 184, 0.12)";
+      context.fillStyle = "rgba(148, 163, 184, 0.7)";
+      context.lineWidth = 1;
+      context.font = "12px Segoe UI, Arial, sans-serif";
+
+      [0, 25, 50, 75, 100].forEach(mark => {
+        const y = top + chartHeight - (mark / 100) * chartHeight;
+        context.beginPath();
+        context.moveTo(left, y);
+        context.lineTo(w - right, y);
+        context.stroke();
+        context.fillText(`${mark}%`, 8, y + 4);
+      });
+
+      const samples = cpuHistory.slice();
+
+      if (samples.length < 2) {
+        context.fillStyle = "rgba(224, 242, 254, 0.82)";
+        context.fillText("Waiting for enough samples to plot history.", left, top + chartHeight / 2);
+        return;
+      }
+
+      const latestTimestamp = samples[samples.length - 1].timestamp;
+      const oldestTimestamp = Math.max(samples[0].timestamp, latestTimestamp - cpuHistoryWindowMs);
+      const spanMs = Math.max(1, latestTimestamp - oldestTimestamp);
+
+      context.beginPath();
+      samples.forEach(sample => {
+        const x = left + (((sample.timestamp - oldestTimestamp) / spanMs) * chartWidth);
+        const y = top + chartHeight - ((sample.percent / 100) * chartHeight);
+        if (sample === samples[0]) {
+          context.moveTo(x, y);
+        } else {
+          context.lineTo(x, y);
+        }
+      });
+
+      context.strokeStyle = "#38bdf8";
+      context.lineWidth = 2.5;
+      context.stroke();
+
+      context.fillStyle = "rgba(56, 189, 248, 0.18)";
+      context.lineTo(left + chartWidth, top + chartHeight);
+      context.lineTo(left, top + chartHeight);
+      context.closePath();
+      context.fill();
+
+      samples.forEach(sample => {
+        const x = left + (((sample.timestamp - oldestTimestamp) / spanMs) * chartWidth);
+        const y = top + chartHeight - ((sample.percent / 100) * chartHeight);
+        context.beginPath();
+        context.arc(x, y, 2.6, 0, Math.PI * 2);
+        context.fillStyle = "#e0f2fe";
+        context.fill();
+      });
+
+      const latest = samples[samples.length - 1];
+      context.fillStyle = "rgba(224, 242, 254, 0.84)";
+      context.fillText(`Latest: ${formatPercent(latest.percent)}%`, left, h - 8);
+    }
+
+    function toggleCpuGraph(forceExpanded) {
+      cpuGraphExpanded = typeof forceExpanded === "boolean" ? forceExpanded : !cpuGraphExpanded;
+      document.getElementById("cpuGraphPanel").classList.toggle("hidden", !cpuGraphExpanded);
+      document.getElementById("cpuCard").setAttribute("aria-expanded", String(cpuGraphExpanded));
+
+      if (cpuGraphExpanded) {
+        drawCpuGraph();
+      }
+    }
+
+    function renderGpuSummary(gpu) {
+      const valueEl = document.getElementById("gpuValue");
+      const detailEl = document.getElementById("gpuDetail");
+      const utilEl = document.getElementById("gpuUtilStat");
+      const vramEl = document.getElementById("gpuVramStat");
+      const memEl = document.getElementById("gpuMemStat");
+
+      if (!gpu) {
+        valueEl.innerText = "--%";
+        detailEl.innerText = "No NVIDIA GPU detected or nvidia-smi is unavailable.";
+        utilEl.innerText = "--%";
+        vramEl.innerText = "--";
+        memEl.innerText = "--%";
+        return;
+      }
+
+      valueEl.innerText = `${formatPercent(gpu.average_gpu_util_percent, 0)}%`;
+      detailEl.innerText = gpu.count === 1
+        ? `${gpu.primary.name} | VRAM ${formatGbPair(gpu.total_vram_used_gb, gpu.total_vram_total_gb)}`
+        : `${gpu.count} GPUs | VRAM ${formatGbPair(gpu.total_vram_used_gb, gpu.total_vram_total_gb)}`;
+      utilEl.innerText = `${formatPercent(gpu.average_gpu_util_percent, 0)}%`;
+      vramEl.innerText = formatGbPair(gpu.total_vram_used_gb, gpu.total_vram_total_gb);
+      memEl.innerText = `${formatPercent(gpu.average_memory_util_percent, 0)}%`;
+    }
+
     function getStateClass(container) {
       if (container.state === "paused" || (container.status || "").includes("Paused")) {
         return "paused";
@@ -544,14 +881,52 @@
     }
 
     function renderSystem(data) {
-      document.getElementById("cpuValue").innerText = `${data.cpu_percent}%`;
-      document.getElementById("cpuDetail").innerText = "Current host CPU usage";
+      latestSystemData = data;
+      pushCpuSample(data.cpu_percent);
+
+      document.getElementById("cpuValue").innerText = `${formatPercent(data.cpu_percent)}%`;
+      document.getElementById("cpuDetail").innerText = "500 ms CPU sample window, shown to 1 decimal place.";
       updateBar("cpuBar", data.cpu_percent);
+      drawCpuGraph();
 
       document.getElementById("ramValue").innerText = `${data.ram_percent}%`;
       document.getElementById("ramDetail").innerText =
         `${data.ram_used_gb} GB used of ${data.ram_total_gb} GB`;
       updateBar("ramBar", data.ram_percent);
+
+      renderGpuSummary(data.gpu);
+    }
+
+    function renderContainerMetrics(container, resources) {
+      const stats = container.stats || {};
+      const cpuCores = Number(resources?.cpu_cores) || 1;
+      const hostCpuPercent = Number(resources?.cpu_percent) || 0;
+      const hostRamPercent = Number(resources?.ram_percent) || 0;
+      const hostRamBytes = Number(resources?.ram_total_bytes) || 0;
+      const containerCpuPercent = Number(stats.cpu_percent) || 0;
+      const containerCpuHostPercent = containerCpuPercent / cpuCores;
+      const containerCpuSharePercent = toPercentOfUsed(containerCpuHostPercent, hostCpuPercent);
+      const containerMemoryUsedBytes = Number(stats.memory_used_bytes) || 0;
+      const containerMemoryHostPercent = hostRamBytes > 0 ? (containerMemoryUsedBytes / hostRamBytes) * 100 : 0;
+      const containerMemorySharePercent = toPercentOfUsed(containerMemoryHostPercent, hostRamPercent);
+      const memoryLimitPercent = Number(stats.memory_percent_container) || 0;
+
+      return `
+        <div class="container-summary">
+          <div class="container-metric">
+            <div class="container-metric-label">CPU</div>
+            <div class="container-metric-value">${formatPercent(containerCpuHostPercent)}% host</div>
+            <div class="container-metric-note">${formatPercent(containerCpuSharePercent)}% of used CPU${containerCpuPercent ? ` | ${formatPercent(containerCpuPercent)}% docker` : ""}</div>
+            <div class="usage-bar"><div class="${fillClass(containerCpuSharePercent)}" style="width: ${containerCpuSharePercent}%"></div></div>
+          </div>
+          <div class="container-metric">
+            <div class="container-metric-label">RAM</div>
+            <div class="container-metric-value">${formatBytes(containerMemoryUsedBytes)} host</div>
+            <div class="container-metric-note">${formatPercent(containerMemorySharePercent)}% of used RAM${memoryLimitPercent ? ` | ${formatPercent(memoryLimitPercent)}% of container limit` : ""}</div>
+            <div class="usage-bar"><div class="${fillClass(containerMemorySharePercent)}" style="width: ${containerMemorySharePercent}%"></div></div>
+          </div>
+        </div>
+      `;
     }
 
     function renderDisks(disks) {
@@ -599,7 +974,7 @@
       `;
     }
 
-    function renderContainers(containers) {
+    function renderContainers(containers, resources = latestSystemData) {
       const list = document.getElementById("containers");
       list.innerHTML = "";
 
@@ -614,6 +989,7 @@
               <div class="status-chip ${stateClass}">${getStateLabel(container)}</div>
             </div>
             <div class="row-subtitle">${escapeHtml(container.status || container.state || "Unknown state")}</div>
+            ${renderContainerMetrics(container, resources)}
           </a>
           <div class="container-actions">
             ${containerActionMarkup(container)}
@@ -707,7 +1083,26 @@
     }
 
     async function loadDashboard() {
-      await Promise.all([loadResources(), loadContainers()]);
+      const [resourcesRes, dockerRes] = await Promise.all([
+        fetch(`${apiBaseUrl}/api/resources`),
+        fetch(`${apiBaseUrl}/api/docker`)
+      ]);
+
+      const resources = await resourcesRes.json();
+      const containers = await dockerRes.json();
+
+      renderSystem(resources);
+
+      if (!Array.isArray(containers)) {
+        setMessage("dockerMessage", containers.detail || "Docker info unavailable", "error");
+        document.getElementById("containers").innerHTML = "";
+        return;
+      }
+
+      setMessage("dockerMessage", "");
+      renderContainers(containers, resources);
+      renderDisks(resources.disks || []);
+      setTimestamp();
     }
 
     async function loadCurrentView() {
@@ -801,6 +1196,27 @@
       }
 
       handleContainerAction(button.dataset.name, button.dataset.action);
+    });
+
+    document.getElementById("cpuCard").addEventListener("click", event => {
+      if (event.target.closest("canvas")) {
+        return;
+      }
+
+      toggleCpuGraph();
+    });
+
+    document.getElementById("cpuCard").addEventListener("keydown", event => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        toggleCpuGraph();
+      }
+    });
+
+    window.addEventListener("resize", () => {
+      if (!document.getElementById("cpuGraphPanel").classList.contains("hidden")) {
+        drawCpuGraph();
+      }
     });
 
     if (currentContainer) {

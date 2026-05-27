@@ -1,46 +1,110 @@
 const express = require("express");
-const os = require("os");
 const cors = require("cors");
-const { exec, execFile } = require("child_process");
+const os = require("os");
+const { readFile } = require("fs/promises");
+const { promisify } = require("util");
+const { execFile } = require("child_process");
 
 const app = express();
+const execFileAsync = promisify(execFile);
 
-app.use(cors()); // 👈 THIS FIXES YOUR ERROR
+app.use(cors());
 
-function getCpuUsage() {
-  const cpus = os.cpus();
-
-  let idle = 0;
-  let total = 0;
-
-  cpus.forEach(cpu => {
-    for (type in cpu.times) {
-      total += cpu.times[type];
-    }
-    idle += cpu.times.idle;
+function sleep(ms) {
+  return new Promise(resolve => {
+    setTimeout(resolve, ms);
   });
+}
 
-  return Math.round((1 - idle / total) * 100);
+async function readAggregateCpuTimes() {
+  const contents = await readFile("/proc/stat", "utf8");
+  const cpuLine = contents.split("\n").find(line => line.startsWith("cpu "));
+
+  if (!cpuLine) {
+    throw new Error("Unable to read CPU stats.");
+  }
+
+  const fields = cpuLine.trim().split(/\s+/).slice(1).map(Number);
+  const idle = (fields[3] || 0) + (fields[4] || 0);
+  const total = fields.reduce((sum, value) => sum + value, 0);
+
+  return { idle, total };
+}
+
+async function getCpuUsage(windowMs = 500) {
+  const start = await readAggregateCpuTimes();
+  await sleep(windowMs);
+  const end = await readAggregateCpuTimes();
+  const totalDelta = end.total - start.total;
+  const idleDelta = end.idle - start.idle;
+
+  if (totalDelta <= 0) {
+    return 0;
+  }
+
+  const percent = (1 - idleDelta / totalDelta) * 100;
+  return Math.max(0, Math.min(100, Math.round(percent * 10) / 10));
 }
 
 function formatBytesToGb(bytes) {
   return (bytes / 1e9).toFixed(2);
 }
 
-function getDiskUsage(callback) {
+function parseNumber(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+async function execFirstAvailable(commandCandidates, args) {
+  let lastError = null;
+
+  for (const command of commandCandidates) {
+    try {
+      return await execFileAsync(command, args);
+    } catch (error) {
+      lastError = error;
+      if (error.code !== "ENOENT") {
+        throw error;
+      }
+    }
+  }
+
+  throw lastError || new Error("No matching command found.");
+}
+
+function parseSizeToBytes(value) {
+  const match = String(value).trim().match(/^([0-9]*\.?[0-9]+)\s*([A-Za-z]+)?$/);
+
+  if (!match) {
+    return 0;
+  }
+
+  const amount = Number(match[1]);
+  const unit = (match[2] || "B").toLowerCase();
+  const units = {
+    b: 1,
+    kb: 1000,
+    mb: 1000 ** 2,
+    gb: 1000 ** 3,
+    tb: 1000 ** 4,
+    kib: 1024,
+    mib: 1024 ** 2,
+    gib: 1024 ** 3,
+    tib: 1024 ** 4
+  };
+
+  return amount * (units[unit] || 1);
+}
+
+async function getDiskUsage() {
   const diskTargets = [
     { path: "/host-root", label: "/" },
     { path: "/srv/fast", label: "/srv/fast" },
     { path: "/srv/storage", label: "/srv/storage" }
   ];
 
-  const diskCommand = `df -kP ${diskTargets.map(target => target.path).join(" ")}`;
-
-  exec(diskCommand, (err, stdout) => {
-    if (err) {
-      callback([]);
-      return;
-    }
+  try {
+    const { stdout } = await execFileAsync("df", ["-kP", ...diskTargets.map(target => target.path)]);
 
     const rows = stdout
       .trim()
@@ -48,7 +112,7 @@ function getDiskUsage(callback) {
       .slice(1)
       .map(line => line.trim().split(/\s+/));
 
-    const disks = rows
+    return rows
       .map((parts, index) => {
         const target = diskTargets[index];
 
@@ -69,35 +133,142 @@ function getDiskUsage(callback) {
         };
       })
       .filter(Boolean);
-
-    callback(disks);
-  });
+  } catch (error) {
+    return [];
+  }
 }
 
-function listContainers(callback) {
-  exec("docker ps -a --format '{{.Names}}|{{.Status}}|{{.State}}'", (err, stdout, stderr) => {
-    if (err) {
-      callback({
-        status: 500,
-        payload: {
-          error: "docker_ps_failed",
-          detail: stderr.trim() || err.message
-        }
-      });
-      return;
-    }
+async function getGpuMetrics() {
+  try {
+    const { stdout } = await execFirstAvailable(["nvidia-smi", "/usr/bin/nvidia-smi", "/bin/nvidia-smi"], [
+      "--query-gpu=index,name,utilization.gpu,utilization.memory,memory.used,memory.total",
+      "--format=csv,noheader,nounits"
+    ]);
 
-    const containers = stdout
+    const gpus = stdout
       .trim()
       .split("\n")
       .filter(Boolean)
       .map(line => {
-        const [name, status, state] = line.split("|");
-        return { name, status, state };
+        const [index, name, gpuUtil, memoryUtil, memoryUsed, memoryTotal] = line
+          .split(",")
+          .map(part => part.trim());
+
+        const usedMb = parseNumber(memoryUsed);
+        const totalMb = parseNumber(memoryTotal);
+
+        return {
+          index: parseNumber(index),
+          name,
+          gpu_util_percent: parseNumber(gpuUtil),
+          memory_util_percent: parseNumber(memoryUtil),
+          vram_used_mb: usedMb,
+          vram_total_mb: totalMb,
+          vram_used_gb: (usedMb / 1024).toFixed(2),
+          vram_total_gb: (totalMb / 1024).toFixed(2),
+          vram_used_percent: totalMb > 0 ? Math.round((usedMb / totalMb) * 100) : 0
+        };
       });
 
-    callback({ status: 200, payload: containers });
-  });
+    if (!gpus.length) {
+      return null;
+    }
+
+    const summary = gpus.reduce(
+      (acc, gpu) => {
+        acc.count += 1;
+        acc.gpuUtilTotal += gpu.gpu_util_percent;
+        acc.memoryUtilTotal += gpu.memory_util_percent;
+        acc.vramUsedMb += gpu.vram_used_mb;
+        acc.vramTotalMb += gpu.vram_total_mb;
+        return acc;
+      },
+      {
+        count: 0,
+        gpuUtilTotal: 0,
+        memoryUtilTotal: 0,
+        vramUsedMb: 0,
+        vramTotalMb: 0
+      }
+    );
+
+    return {
+      count: summary.count,
+      primary: gpus[0],
+      average_gpu_util_percent: Math.round(summary.gpuUtilTotal / summary.count),
+      average_memory_util_percent: Math.round(summary.memoryUtilTotal / summary.count),
+      total_vram_used_gb: (summary.vramUsedMb / 1024).toFixed(2),
+      total_vram_total_gb: (summary.vramTotalMb / 1024).toFixed(2),
+      gpus
+    };
+  } catch (error) {
+    return null;
+  }
+}
+
+async function getContainerStats() {
+  try {
+    const { stdout } = await execFileAsync("docker", [
+      "stats",
+      "--no-stream",
+      "--format",
+      "{{.Name}}|{{.CPUPerc}}|{{.MemUsage}}|{{.MemPerc}}"
+    ]);
+
+    return stdout
+      .trim()
+      .split("\n")
+      .filter(Boolean)
+      .reduce((statsByName, line) => {
+        const [name, cpuPerc, memUsage, memPerc] = line.split("|");
+        const [memoryUsed, memoryLimit] = (memUsage || "").split("/").map(part => part.trim());
+        const usedBytes = parseSizeToBytes(memoryUsed);
+        const limitBytes = parseSizeToBytes(memoryLimit);
+
+        statsByName[name] = {
+          cpu_percent: parseNumber(String(cpuPerc).replace("%", "")),
+          memory_used_bytes: usedBytes,
+          memory_limit_bytes: limitBytes,
+          memory_percent_container: parseNumber(String(memPerc).replace("%", "")),
+          memory_used_gb: (usedBytes / 1e9).toFixed(2),
+          memory_limit_gb: limitBytes > 0 ? (limitBytes / 1e9).toFixed(2) : null
+        };
+
+        return statsByName;
+      }, {});
+  } catch (error) {
+    return {};
+  }
+}
+
+async function listContainers() {
+  const [psResult, statsByName] = await Promise.all([
+    execFileAsync("docker", ["ps", "-a", "--format", "{{.Names}}|{{.Status}}|{{.State}}"]),
+    getContainerStats()
+  ]);
+
+  return psResult.stdout
+    .trim()
+    .split("\n")
+    .filter(Boolean)
+    .map(line => {
+      const [name, status, state] = line.split("|");
+      const containerStats = statsByName[name] || {
+        cpu_percent: 0,
+        memory_used_bytes: 0,
+        memory_limit_bytes: 0,
+        memory_percent_container: 0,
+        memory_used_gb: "0.00",
+        memory_limit_gb: null
+      };
+
+      return {
+        name,
+        status,
+        state,
+        stats: containerStats
+      };
+    });
 }
 
 function isValidContainerName(name) {
@@ -175,24 +346,47 @@ function getContainerLogs(name, callback) {
 }
 
 app.get("/api/resources", (req, res) => {
-  const mem = os.totalmem();
-  const free = os.freemem();
+  (async () => {
+    const mem = os.totalmem();
+    const free = os.freemem();
+    const cpuCores = os.cpus().length;
 
-  getDiskUsage(disks => {
+    const [cpu_percent, disks, gpu] = await Promise.all([
+      getCpuUsage(),
+      getDiskUsage(),
+      getGpuMetrics()
+    ]);
+
     res.json({
-      cpu_percent: getCpuUsage(),
+      cpu_percent,
+      cpu_cores: cpuCores,
       ram_percent: Math.round(((mem - free) / mem) * 100),
       ram_used_gb: ((mem - free) / 1e9).toFixed(2),
       ram_total_gb: (mem / 1e9).toFixed(2),
-      disks
+      ram_used_bytes: mem - free,
+      ram_total_bytes: mem,
+      disks,
+      gpu
+    });
+  })().catch(error => {
+    res.status(500).json({
+      error: "resource_snapshot_failed",
+      detail: error.message
     });
   });
 });
 
 app.get("/api/docker", (req, res) => {
-  listContainers(result => {
-    res.status(result.status).json(result.payload);
-  });
+  listContainers()
+    .then(containers => {
+      res.json(containers);
+    })
+    .catch(error => {
+      res.status(500).json({
+        error: "docker_ps_failed",
+        detail: error.stderr?.trim() || error.message
+      });
+    });
 });
 
 app.get("/api/docker/:name", (req, res) => {
