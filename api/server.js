@@ -19,7 +19,7 @@ function roundTo(value, digits = 2) {
   return Number(toFiniteNumber(value).toFixed(digits));
 }
 
-function buildResourceSnapshot({ cpu_percent, disks, gpu, cpu_cores, ram_used_bytes, ram_total_bytes, ram_percent }) {
+function buildResourceSnapshot({ cpu_percent, disks, gpu, network, cpu_cores, ram_used_bytes, ram_total_bytes, ram_percent }) {
   return {
     ok: true,
     generated_at: new Date().toISOString(),
@@ -31,7 +31,8 @@ function buildResourceSnapshot({ cpu_percent, disks, gpu, cpu_cores, ram_used_by
     ram_used_bytes: toFiniteNumber(ram_used_bytes),
     ram_total_bytes: toFiniteNumber(ram_total_bytes),
     disks: Array.isArray(disks) ? disks : [],
-    gpu: gpu || null
+    gpu: gpu || null,
+    network: network || null
   };
 }
 
@@ -169,6 +170,63 @@ async function getDiskUsage() {
       .filter(Boolean);
   } catch (error) {
     return [];
+  }
+}
+
+async function readNetworkTotals() {
+  const contents = await readFile("/proc/net/dev", "utf8");
+  const lines = contents.trim().split("\n").slice(2);
+
+  return lines.reduce((totals, line) => {
+    const [interfaceName, valuesPart] = line.split(":");
+    const name = (interfaceName || "").trim();
+    const values = (valuesPart || "").trim().split(/\s+/);
+
+    if (!name || name === "lo" || values.length < 16) {
+      return totals;
+    }
+
+    const rxBytes = Number(values[0]);
+    const txBytes = Number(values[8]);
+
+    if (!Number.isFinite(rxBytes) || !Number.isFinite(txBytes)) {
+      return totals;
+    }
+
+    totals.interface_count += 1;
+    totals.rx_bytes += rxBytes;
+    totals.tx_bytes += txBytes;
+    return totals;
+  }, {
+    interface_count: 0,
+    rx_bytes: 0,
+    tx_bytes: 0
+  });
+}
+
+async function getNetworkUsage(windowMs = 1000) {
+  try {
+    const start = await readNetworkTotals();
+    await sleep(windowMs);
+    const end = await readNetworkTotals();
+    const elapsedSeconds = Math.max(1, windowMs / 1000);
+    const rxBytesPerSec = Math.max(0, end.rx_bytes - start.rx_bytes) / elapsedSeconds;
+    const txBytesPerSec = Math.max(0, end.tx_bytes - start.tx_bytes) / elapsedSeconds;
+
+    return {
+      interface_count: end.interface_count,
+      rx_bytes: end.rx_bytes,
+      tx_bytes: end.tx_bytes,
+      rx_bytes_per_sec: roundTo(rxBytesPerSec),
+      tx_bytes_per_sec: roundTo(txBytesPerSec),
+      rx_mbps: roundTo((rxBytesPerSec * 8) / 1e6),
+      tx_mbps: roundTo((txBytesPerSec * 8) / 1e6),
+      total_mbps: roundTo(((rxBytesPerSec + txBytesPerSec) * 8) / 1e6),
+      rx_gb: roundTo(end.rx_bytes / 1e9),
+      tx_gb: roundTo(end.tx_bytes / 1e9)
+    };
+  } catch (error) {
+    return null;
   }
 }
 
@@ -318,7 +376,8 @@ async function listContainers() {
         state,
         stats: containerStats
       };
-    });
+    })
+    .sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: "base" }));
 }
 
 function isValidContainerName(name) {
@@ -401,9 +460,10 @@ app.get("/api/resources", (req, res) => {
     const free = os.freemem();
     const cpuCores = os.cpus().length;
 
-    const [cpu_percent, disks, gpu] = await Promise.all([
+    const [cpu_percent, disks, network, gpu] = await Promise.all([
       getCpuUsage(),
       getDiskUsage(),
+      getNetworkUsage(),
       getGpuMetrics()
     ]);
 
@@ -415,7 +475,8 @@ app.get("/api/resources", (req, res) => {
         ram_used_bytes: mem - free,
         ram_total_bytes: mem,
         disks,
-        gpu
+        gpu,
+        network
       })
     );
   })().catch(error => {
