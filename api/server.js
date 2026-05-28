@@ -10,6 +10,31 @@ const execFileAsync = promisify(execFile);
 
 app.use(cors());
 
+function toFiniteNumber(value, fallback = 0) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function roundTo(value, digits = 2) {
+  return Number(toFiniteNumber(value).toFixed(digits));
+}
+
+function buildResourceSnapshot({ cpu_percent, disks, gpu, cpu_cores, ram_used_bytes, ram_total_bytes, ram_percent }) {
+  return {
+    ok: true,
+    generated_at: new Date().toISOString(),
+    cpu_percent: toFiniteNumber(cpu_percent),
+    cpu_cores: toFiniteNumber(cpu_cores, 1) || 1,
+    ram_percent: toFiniteNumber(ram_percent),
+    ram_used_gb: roundTo(toFiniteNumber(ram_used_bytes) / 1e9),
+    ram_total_gb: roundTo(toFiniteNumber(ram_total_bytes) / 1e9),
+    ram_used_bytes: toFiniteNumber(ram_used_bytes),
+    ram_total_bytes: toFiniteNumber(ram_total_bytes),
+    disks: Array.isArray(disks) ? disks : [],
+    gpu: gpu || null
+  };
+}
+
 function sleep(ms) {
   return new Promise(resolve => {
     setTimeout(resolve, ms);
@@ -31,7 +56,7 @@ async function readAggregateCpuTimes() {
   return { idle, total };
 }
 
-async function getCpuUsage(windowMs = 500) {
+async function getCpuUsage(windowMs = 1000) {
   const start = await readAggregateCpuTimes();
   await sleep(windowMs);
   const end = await readAggregateCpuTimes();
@@ -47,12 +72,7 @@ async function getCpuUsage(windowMs = 500) {
 }
 
 function formatBytesToGb(bytes) {
-  return (bytes / 1e9).toFixed(2);
-}
-
-function parseNumber(value) {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : 0;
+  return roundTo(bytes / 1e9);
 }
 
 async function execFirstAvailable(commandCandidates, args) {
@@ -70,6 +90,20 @@ async function execFirstAvailable(commandCandidates, args) {
   }
 
   throw lastError || new Error("No matching command found.");
+}
+
+function summarizeExecError(error) {
+  if (!error) {
+    return "Unknown GPU probe failure.";
+  }
+
+  const detail =
+    error.stderr?.trim() ||
+    error.stdout?.trim() ||
+    error.message ||
+    "Unknown GPU probe failure.";
+
+  return detail;
 }
 
 function parseSizeToBytes(value) {
@@ -126,7 +160,7 @@ async function getDiskUsage() {
 
         return {
           path: target.label,
-          percent_used: parts[4],
+          percent_used: toFiniteNumber(String(parts[4]).replace("%", "")),
           used_gb: formatBytesToGb(usedBytes),
           total_gb: formatBytesToGb(totalBytes),
           available_gb: formatBytesToGb(availableBytes)
@@ -140,10 +174,23 @@ async function getDiskUsage() {
 
 async function getGpuMetrics() {
   try {
-    const { stdout } = await execFirstAvailable(["nvidia-smi", "/usr/bin/nvidia-smi", "/bin/nvidia-smi"], [
+    const queryArgs = [
       "--query-gpu=index,name,utilization.gpu,utilization.memory,memory.used,memory.total",
       "--format=csv,noheader,nounits"
-    ]);
+    ];
+
+    let stdout = null;
+
+    try {
+      ({ stdout } = await execFileAsync("chroot", ["/host-root", "/usr/lib/nvidia/current/nvidia-smi", ...queryArgs]));
+    } catch (chrootError) {
+      ({ stdout } = await execFirstAvailable([
+        "/usr/lib/nvidia/current/nvidia-smi",
+        "nvidia-smi",
+        "/usr/bin/nvidia-smi",
+        "/bin/nvidia-smi"
+      ], queryArgs));
+    }
 
     const gpus = stdout
       .trim()
@@ -154,18 +201,18 @@ async function getGpuMetrics() {
           .split(",")
           .map(part => part.trim());
 
-        const usedMb = parseNumber(memoryUsed);
-        const totalMb = parseNumber(memoryTotal);
+        const usedMb = toFiniteNumber(memoryUsed);
+        const totalMb = toFiniteNumber(memoryTotal);
 
         return {
-          index: parseNumber(index),
+          index: toFiniteNumber(index),
           name,
-          gpu_util_percent: parseNumber(gpuUtil),
-          memory_util_percent: parseNumber(memoryUtil),
+          gpu_util_percent: toFiniteNumber(gpuUtil),
+          memory_util_percent: toFiniteNumber(memoryUtil),
           vram_used_mb: usedMb,
           vram_total_mb: totalMb,
-          vram_used_gb: (usedMb / 1024).toFixed(2),
-          vram_total_gb: (totalMb / 1024).toFixed(2),
+          vram_used_gb: roundTo(usedMb / 1024),
+          vram_total_gb: roundTo(totalMb / 1024),
           vram_used_percent: totalMb > 0 ? Math.round((usedMb / totalMb) * 100) : 0
         };
       });
@@ -197,12 +244,15 @@ async function getGpuMetrics() {
       primary: gpus[0],
       average_gpu_util_percent: Math.round(summary.gpuUtilTotal / summary.count),
       average_memory_util_percent: Math.round(summary.memoryUtilTotal / summary.count),
-      total_vram_used_gb: (summary.vramUsedMb / 1024).toFixed(2),
-      total_vram_total_gb: (summary.vramTotalMb / 1024).toFixed(2),
+      total_vram_used_gb: roundTo(summary.vramUsedMb / 1024),
+      total_vram_total_gb: roundTo(summary.vramTotalMb / 1024),
       gpus
     };
   } catch (error) {
-    return null;
+    return {
+      error: "gpu_probe_failed",
+      detail: summarizeExecError(error)
+    };
   }
 }
 
@@ -226,12 +276,12 @@ async function getContainerStats() {
         const limitBytes = parseSizeToBytes(memoryLimit);
 
         statsByName[name] = {
-          cpu_percent: parseNumber(String(cpuPerc).replace("%", "")),
+          cpu_percent: toFiniteNumber(String(cpuPerc).replace("%", "")),
           memory_used_bytes: usedBytes,
           memory_limit_bytes: limitBytes,
-          memory_percent_container: parseNumber(String(memPerc).replace("%", "")),
-          memory_used_gb: (usedBytes / 1e9).toFixed(2),
-          memory_limit_gb: limitBytes > 0 ? (limitBytes / 1e9).toFixed(2) : null
+          memory_percent_container: toFiniteNumber(String(memPerc).replace("%", "")),
+          memory_used_gb: roundTo(usedBytes / 1e9),
+          memory_limit_gb: limitBytes > 0 ? roundTo(limitBytes / 1e9) : null
         };
 
         return statsByName;
@@ -258,7 +308,7 @@ async function listContainers() {
         memory_used_bytes: 0,
         memory_limit_bytes: 0,
         memory_percent_container: 0,
-        memory_used_gb: "0.00",
+        memory_used_gb: 0,
         memory_limit_gb: null
       };
 
@@ -357,20 +407,22 @@ app.get("/api/resources", (req, res) => {
       getGpuMetrics()
     ]);
 
-    res.json({
-      cpu_percent,
-      cpu_cores: cpuCores,
-      ram_percent: Math.round(((mem - free) / mem) * 100),
-      ram_used_gb: ((mem - free) / 1e9).toFixed(2),
-      ram_total_gb: (mem / 1e9).toFixed(2),
-      ram_used_bytes: mem - free,
-      ram_total_bytes: mem,
-      disks,
-      gpu
-    });
+    res.json(
+      buildResourceSnapshot({
+        cpu_percent,
+        cpu_cores: cpuCores,
+        ram_percent: mem > 0 ? Math.round(((mem - free) / mem) * 100) : 0,
+        ram_used_bytes: mem - free,
+        ram_total_bytes: mem,
+        disks,
+        gpu
+      })
+    );
   })().catch(error => {
     res.status(500).json({
+      ok: false,
       error: "resource_snapshot_failed",
+      generated_at: new Date().toISOString(),
       detail: error.message
     });
   });

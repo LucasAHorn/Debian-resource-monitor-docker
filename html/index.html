@@ -509,7 +509,7 @@
       <div class="panel section">
         <div class="section-header">
           <h2>System Overview</h2>
-          <span>Updates every 5 seconds, with 500 ms CPU sampling</span>
+          <span>Updates every 5 seconds, with 1s CPU sampling</span>
         </div>
         <div class="metrics">
           <article id="cpuCard" class="metric-card clickable" role="button" tabindex="0" aria-expanded="false">
@@ -519,7 +519,7 @@
             <div class="usage-bar"><div id="cpuBar" class="usage-fill" style="width: 0%"></div></div>
             <div id="cpuGraphPanel" class="metric-graph hidden">
               <canvas id="cpuGraph" class="graph-canvas" width="720" height="240"></canvas>
-              <div class="graph-caption">Last 6 minutes of CPU samples, captured from 500 ms snapshots.</div>
+              <!-- <div class="graph-caption">1s sample every 5s</div> -->
             </div>
           </article>
           <article class="metric-card">
@@ -607,8 +607,10 @@
   </main>
 
   <script>
-    const apiBaseUrl = `${window.location.protocol}//${window.location.hostname}:5000`;
-    const refreshIntervalMs = 5000;
+    const apiBaseUrl = window.location.protocol === "file:"
+      ? "http://localhost:5000/api"
+      : "/api";
+    const refreshIntervalMs = 1000;
     const pendingActions = new Set();
     const protectedContainers = new Set(["dashboard-web", "resource-api"]);
     const currentPath = decodeURIComponent(window.location.pathname.replace(/^\/+|\/+$/g, ""));
@@ -619,12 +621,168 @@
     let cpuGraphExpanded = false;
 
     function escapeHtml(value) {
-      return value
+      return String(value ?? "")
         .replaceAll("&", "&amp;")
         .replaceAll("<", "&lt;")
         .replaceAll(">", "&gt;")
         .replaceAll("\"", "&quot;")
         .replaceAll("'", "&#39;");
+    }
+
+    function isPlainObject(value) {
+      return value !== null && typeof value === "object" && !Array.isArray(value);
+    }
+
+    function toFiniteNumber(value, fallback = 0) {
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : fallback;
+    }
+
+    async function fetchJson(url, options = {}) {
+      const response = await fetch(url, options);
+      let payload = null;
+
+      try {
+        payload = await response.json();
+      } catch (error) {
+        throw new Error(`Invalid JSON from ${url}`);
+      }
+
+      if (!response.ok) {
+        const detail = isPlainObject(payload)
+          ? payload.detail || payload.error
+          : null;
+        throw new Error(detail || `${response.status} ${response.statusText}`);
+      }
+
+      return payload;
+    }
+
+    function normalizeGpuSummary(gpu) {
+      if (!isPlainObject(gpu)) {
+        return null;
+      }
+
+      const gpus = Array.isArray(gpu.gpus) ? gpu.gpus : [];
+
+      return {
+        error: gpu.error || null,
+        detail: gpu.detail || null,
+        count: toFiniteNumber(gpu.count),
+        primary: isPlainObject(gpu.primary) ? gpu.primary : null,
+        average_gpu_util_percent: toFiniteNumber(gpu.average_gpu_util_percent),
+        average_memory_util_percent: toFiniteNumber(gpu.average_memory_util_percent),
+        total_vram_used_gb: toFiniteNumber(gpu.total_vram_used_gb),
+        total_vram_total_gb: toFiniteNumber(gpu.total_vram_total_gb),
+        gpus: gpus.map(item => ({
+          index: toFiniteNumber(item.index),
+          name: item.name || "GPU",
+          gpu_util_percent: toFiniteNumber(item.gpu_util_percent),
+          memory_util_percent: toFiniteNumber(item.memory_util_percent),
+          vram_used_mb: toFiniteNumber(item.vram_used_mb),
+          vram_total_mb: toFiniteNumber(item.vram_total_mb),
+          vram_used_gb: toFiniteNumber(item.vram_used_gb),
+          vram_total_gb: toFiniteNumber(item.vram_total_gb),
+          vram_used_percent: toFiniteNumber(item.vram_used_percent)
+        }))
+      };
+    }
+
+    function normalizeResourceSnapshot(payload) {
+      if (!isPlainObject(payload)) {
+        throw new Error("Malformed resource snapshot");
+      }
+
+      return {
+        ok: payload.ok !== false,
+        generated_at: payload.generated_at || null,
+        cpu_percent: toFiniteNumber(payload.cpu_percent),
+        cpu_cores: Math.max(1, toFiniteNumber(payload.cpu_cores, 1)),
+        ram_percent: toFiniteNumber(payload.ram_percent),
+        ram_used_gb: toFiniteNumber(payload.ram_used_gb),
+        ram_total_gb: toFiniteNumber(payload.ram_total_gb),
+        ram_used_bytes: toFiniteNumber(payload.ram_used_bytes),
+        ram_total_bytes: toFiniteNumber(payload.ram_total_bytes),
+        disks: Array.isArray(payload.disks)
+          ? payload.disks.map(disk => ({
+              path: disk.path || "",
+              percent_used: toFiniteNumber(disk.percent_used),
+              used_gb: toFiniteNumber(disk.used_gb),
+              total_gb: toFiniteNumber(disk.total_gb),
+              available_gb: toFiniteNumber(disk.available_gb)
+            })).filter(disk => disk.path)
+          : [],
+        gpu: normalizeGpuSummary(payload.gpu)
+      };
+    }
+
+    function normalizeContainerStats(stats) {
+      if (!isPlainObject(stats)) {
+        return {
+          cpu_percent: 0,
+          memory_used_bytes: 0,
+          memory_limit_bytes: 0,
+          memory_percent_container: 0,
+          memory_used_gb: 0,
+          memory_limit_gb: null
+        };
+      }
+
+      return {
+        cpu_percent: toFiniteNumber(stats.cpu_percent),
+        memory_used_bytes: toFiniteNumber(stats.memory_used_bytes),
+        memory_limit_bytes: toFiniteNumber(stats.memory_limit_bytes),
+        memory_percent_container: toFiniteNumber(stats.memory_percent_container),
+        memory_used_gb: toFiniteNumber(stats.memory_used_gb),
+        memory_limit_gb: stats.memory_limit_gb === null ? null : toFiniteNumber(stats.memory_limit_gb)
+      };
+    }
+
+    function normalizeContainerList(payload) {
+      if (!Array.isArray(payload)) {
+        throw new Error("Malformed container list");
+      }
+
+      return payload.map(container => ({
+        name: container.name || "",
+        status: container.status || "",
+        state: container.state || "",
+        stats: normalizeContainerStats(container.stats)
+      })).filter(container => container.name);
+    }
+
+    function normalizeContainerDetail(payload) {
+      if (!isPlainObject(payload)) {
+        throw new Error("Malformed container detail");
+      }
+
+      return {
+        name: payload.name || "",
+        state: isPlainObject(payload.state)
+          ? {
+              status: payload.state.status || "unknown",
+              running: Boolean(payload.state.running),
+              paused: Boolean(payload.state.paused),
+              exit_code: toFiniteNumber(payload.state.exit_code),
+              started_at: payload.state.started_at || null,
+              finished_at: payload.state.finished_at || null
+            }
+          : {
+              status: "unknown",
+              running: false,
+              paused: false,
+              exit_code: 0,
+              started_at: null,
+              finished_at: null
+            },
+        config: isPlainObject(payload.config)
+          ? { image: payload.config.image || "Unknown image" }
+          : { image: "Unknown image" },
+        network: isPlainObject(payload.network)
+          ? { ports: isPlainObject(payload.network.ports) ? payload.network.ports : {} }
+          : { ports: {} },
+        logs: payload.logs || ""
+      };
     }
 
     function setTimestamp() {
@@ -676,8 +834,18 @@
       return Math.max(0, Math.min(100, numericValue));
     }
 
+    function formatGb(value) {
+      const numericValue = Number(value);
+
+      if (!Number.isFinite(numericValue)) {
+        return "--";
+      }
+
+      return numericValue.toFixed(2);
+    }
+
     function formatGbPair(used, total) {
-      return `${used} GB / ${total} GB`;
+      return `${formatGb(used)} GB / ${formatGb(total)} GB`;
     }
 
     function formatBytes(bytes) {
@@ -806,18 +974,8 @@
       context.closePath();
       context.fill();
 
-      samples.forEach(sample => {
-        const x = left + (((sample.timestamp - oldestTimestamp) / spanMs) * chartWidth);
-        const y = top + chartHeight - ((sample.percent / 100) * chartHeight);
-        context.beginPath();
-        context.arc(x, y, 2.6, 0, Math.PI * 2);
-        context.fillStyle = "#e0f2fe";
-        context.fill();
-      });
-
       const latest = samples[samples.length - 1];
       context.fillStyle = "rgba(224, 242, 254, 0.84)";
-      context.fillText(`Latest: ${formatPercent(latest.percent)}%`, left, h - 8);
     }
 
     function toggleCpuGraph(forceExpanded) {
@@ -846,10 +1004,17 @@
         return;
       }
 
+      if (gpu.error) {
+        valueEl.innerText = "--%";
+        detailEl.innerText = gpu.detail || "GPU probe failed.";
+        utilEl.innerText = "--%";
+        vramEl.innerText = "--";
+        memEl.innerText = "--%";
+        return;
+      }
+
       valueEl.innerText = `${formatPercent(gpu.average_gpu_util_percent, 0)}%`;
-      detailEl.innerText = gpu.count === 1
-        ? `${gpu.primary.name} | VRAM ${formatGbPair(gpu.total_vram_used_gb, gpu.total_vram_total_gb)}`
-        : `${gpu.count} GPUs | VRAM ${formatGbPair(gpu.total_vram_used_gb, gpu.total_vram_total_gb)}`;
+      detailEl.innerText = gpu.primary?.name || `${gpu.count} GPUs`;
       utilEl.innerText = `${formatPercent(gpu.average_gpu_util_percent, 0)}%`;
       vramEl.innerText = formatGbPair(gpu.total_vram_used_gb, gpu.total_vram_total_gb);
       memEl.innerText = `${formatPercent(gpu.average_memory_util_percent, 0)}%`;
@@ -885,13 +1050,13 @@
       pushCpuSample(data.cpu_percent);
 
       document.getElementById("cpuValue").innerText = `${formatPercent(data.cpu_percent)}%`;
-      document.getElementById("cpuDetail").innerText = "500 ms CPU sample window, shown to 1 decimal place.";
+      document.getElementById("cpuDetail").innerText = "1 second CPU sample window";
       updateBar("cpuBar", data.cpu_percent);
       drawCpuGraph();
 
       document.getElementById("ramValue").innerText = `${data.ram_percent}%`;
       document.getElementById("ramDetail").innerText =
-        `${data.ram_used_gb} GB used of ${data.ram_total_gb} GB`;
+        `${formatGb(data.ram_used_gb)} GB used of ${formatGb(data.ram_total_gb)} GB`;
       updateBar("ramBar", data.ram_percent);
 
       renderGpuSummary(data.gpu);
@@ -934,17 +1099,17 @@
       diskList.innerHTML = "";
 
       disks.forEach(disk => {
-        const usedPercent = Number.parseInt(disk.percent_used, 10);
+        const usedPercent = clampPercent(disk.percent_used);
         const row = document.createElement("article");
         row.className = "disk-row";
         row.innerHTML = `
           <div style="flex: 1; min-width: 0;">
             <div class="row-title">${escapeHtml(disk.path)}</div>
-            <div class="row-subtitle">${escapeHtml(disk.used_gb)} GB used of ${escapeHtml(disk.total_gb)} GB, ${escapeHtml(disk.available_gb)} GB remaining</div>
+            <div class="row-subtitle">${escapeHtml(formatGb(disk.used_gb))} GB used of ${escapeHtml(formatGb(disk.total_gb))} GB, ${escapeHtml(formatGb(disk.available_gb))} GB remaining</div>
             <div class="usage-bar"><div class="${fillClass(usedPercent)}" style="width: ${usedPercent}%"></div></div>
           </div>
           <div class="status-chip ${usedPercent < 80 ? "running" : usedPercent < 90 ? "" : "stopped"}">
-            ${escapeHtml(disk.percent_used)} used
+            ${escapeHtml(disk.percent_used)}% used
           </div>
         `;
         diskList.appendChild(row);
@@ -1048,61 +1213,62 @@
     }
 
     async function loadResources() {
-      const res = await fetch(`${apiBaseUrl}/api/resources`);
-      const data = await res.json();
+      const data = normalizeResourceSnapshot(await fetchJson(`${apiBaseUrl}/resources`));
       renderSystem(data);
       renderDisks(data.disks || []);
       setTimestamp();
     }
 
     async function loadContainers() {
-      const dockerRes = await fetch(`${apiBaseUrl}/api/docker`);
-      const containers = await dockerRes.json();
-
-      if (!Array.isArray(containers)) {
-        setMessage("dockerMessage", containers.detail || "Docker info unavailable", "error");
-        document.getElementById("containers").innerHTML = "";
-        return;
-      }
-
+      const containers = normalizeContainerList(await fetchJson(`${apiBaseUrl}/docker`));
       setMessage("dockerMessage", "");
       renderContainers(containers);
     }
 
     async function loadContainerDetail() {
-      const res = await fetch(`${apiBaseUrl}/api/docker/${encodeURIComponent(currentContainer)}`);
-      const container = await res.json();
-
-      if (!res.ok) {
-        throw new Error(container.detail || "Container detail unavailable");
-      }
-
+      const container = normalizeContainerDetail(
+        await fetchJson(`${apiBaseUrl}/docker/${encodeURIComponent(currentContainer)}`)
+      );
       renderDetail(container);
       setMessage("detailMessage", "");
       setTimestamp();
     }
 
     async function loadDashboard() {
-      const [resourcesRes, dockerRes] = await Promise.all([
-        fetch(`${apiBaseUrl}/api/resources`),
-        fetch(`${apiBaseUrl}/api/docker`)
+      const [resourcesRes, dockerRes] = await Promise.allSettled([
+        fetchJson(`${apiBaseUrl}/resources`),
+        fetchJson(`${apiBaseUrl}/docker`)
       ]);
 
-      const resources = await resourcesRes.json();
-      const containers = await dockerRes.json();
+      let resources = latestSystemData;
+      const dashboardErrors = [];
 
-      renderSystem(resources);
-
-      if (!Array.isArray(containers)) {
-        setMessage("dockerMessage", containers.detail || "Docker info unavailable", "error");
-        document.getElementById("containers").innerHTML = "";
-        return;
+      if (resourcesRes.status === "fulfilled") {
+        resources = normalizeResourceSnapshot(resourcesRes.value);
+        renderSystem(resources);
+        renderDisks(resources.disks || []);
+        setTimestamp();
+      } else {
+        dashboardErrors.push(`Resource snapshot unavailable: ${resourcesRes.reason.message}`);
       }
 
-      setMessage("dockerMessage", "");
-      renderContainers(containers, resources);
-      renderDisks(resources.disks || []);
-      setTimestamp();
+      if (dockerRes.status === "fulfilled") {
+        const containers = normalizeContainerList(dockerRes.value);
+        renderContainers(containers, resources || latestSystemData);
+      } else {
+        document.getElementById("containers").innerHTML = "";
+        dashboardErrors.push(`Docker info unavailable: ${dockerRes.reason.message}`);
+      }
+
+      if (dashboardErrors.length) {
+        setMessage("dockerMessage", dashboardErrors.join(" | "), "error");
+      } else {
+        setMessage("dockerMessage", "");
+      }
+
+      if (resourcesRes.status === "fulfilled") {
+        setTimestamp();
+      }
     }
 
     async function loadCurrentView() {
@@ -1119,7 +1285,8 @@
 
     function scheduleAlignedRefresh() {
       const now = new Date();
-      let delayMs = ((5 - (now.getSeconds() % 5)) * 1000) - now.getMilliseconds();
+      const elapsedInWindowMs = (now.getSeconds() * 1000 + now.getMilliseconds()) % refreshIntervalMs;
+      let delayMs = refreshIntervalMs - elapsedInWindowMs;
 
       if (delayMs <= 0) {
         delayMs = refreshIntervalMs;
@@ -1159,7 +1326,7 @@
       renderPendingButtonState(name);
 
       try {
-        const response = await fetch(`${apiBaseUrl}/api/docker/${encodeURIComponent(name)}/${action}`, {
+        const response = await fetch(`${apiBaseUrl}/docker/${encodeURIComponent(name)}/${action}`, {
           method: "POST"
         });
         const payload = await response.json();
