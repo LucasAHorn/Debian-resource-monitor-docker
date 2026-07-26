@@ -1,0 +1,23 @@
+{
+  "name": "Secure AI Agent Sandbox",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
+  "workspaceFolder": "/workspace",
+  "remoteUser": "sandboxuser",
+  "updateRemoteUserUID": true,
+  "runArgs": [
+    "--cap-drop=ALL",
+    "--security-opt=no-new-privileges:true",
+    "--add-host=host.docker.internal:host-gateway"
+  ],
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "saoudrizwan.claude-dev",
+        "ms-python.python"
+      ]
+    }
+  }
+}
