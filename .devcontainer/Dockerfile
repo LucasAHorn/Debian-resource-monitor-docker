@@ -1,6 +1,6 @@
 FROM debian:bookworm-slim
 
-# Install VS Code tools, Python, Pip, venv, and Node.js (for JavaScript)
+# Install VS Code tools, Python, Pip, and venv.
 RUN apt-get update && apt-get install -y \
     git \
     curl \
@@ -9,8 +9,6 @@ RUN apt-get update && apt-get install -y \
     python3 \
     python3-pip \
     python3-venv \
-    nodejs \
-    npm \
     && rm -rf /var/lib/apt/lists/*
 
 # Create a non-root user
