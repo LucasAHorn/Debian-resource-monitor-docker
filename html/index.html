@@ -438,6 +438,13 @@
       color: #fcd34d;
     }
 
+    .empty-state {
+      padding: 18px;
+      border: 1px dashed var(--panel-strong);
+      border-radius: 8px;
+      color: var(--muted);
+    }
+
     .detail-grid {
       grid-template-columns: repeat(2, minmax(0, 1fr));
     }
@@ -1137,6 +1144,22 @@
       renderGpuSummary(data.gpu);
     }
 
+    function renderSystemUnavailable() {
+      latestSystemData = null;
+      ["cpuValue", "ramValue", "networkValue", "gpuValue"].forEach(id => {
+        document.getElementById(id).innerText = "--";
+      });
+      document.getElementById("cpuDetail").innerText = "Resource snapshot unavailable.";
+      document.getElementById("ramDetail").innerText = "Resource snapshot unavailable.";
+      document.getElementById("networkDetail").innerText = "No network data available.";
+      document.getElementById("gpuDetail").innerText = "GPU data unavailable.";
+      ["cpuBar", "ramBar"].forEach(id => { document.getElementById(id).style.width = "0%"; });
+      ["networkDownStat", "networkUpStat", "networkTotalStat", "gpuUtilStat", "gpuVramStat", "gpuMemStat"].forEach(id => {
+        document.getElementById(id).innerText = "--";
+      });
+      renderDisks([]);
+    }
+
     function renderContainerMetrics(container, resources) {
       const stats = container.stats || {};
       const cpuCores = Number(resources?.cpu_cores) || 1;
@@ -1172,6 +1195,11 @@
     function renderDisks(disks) {
       const diskList = document.getElementById("disks");
       diskList.innerHTML = "";
+
+      if (!disks.length) {
+        diskList.innerHTML = '<div class="empty-state">Disk data unavailable.</div>';
+        return;
+      }
 
       disks.forEach(disk => {
         const usedPercent = clampPercent(disk.percent_used);
@@ -1324,6 +1352,7 @@
         renderDisks(resources.disks || []);
         setTimestamp();
       } else {
+        renderSystemUnavailable();
         dashboardErrors.push(`Resource snapshot unavailable: ${resourcesRes.reason.message}`);
       }
 
@@ -1331,7 +1360,7 @@
         const containers = normalizeContainerList(dockerRes.value);
         renderContainers(containers, resources || latestSystemData);
       } else {
-        document.getElementById("containers").innerHTML = "";
+        document.getElementById("containers").innerHTML = '<div class="empty-state">Docker container data unavailable.</div>';
         dashboardErrors.push(`Docker info unavailable: ${dockerRes.reason.message}`);
       }
 
