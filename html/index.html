@@ -558,6 +558,14 @@
                 <div class="metric-stat-label">Total</div>
                 <div id="networkTotalStat" class="metric-stat-value">--</div>
               </div>
+                <div class="metric-stat">
+                  <div class="metric-stat-label">RX Total</div>
+                  <div id="networkRxTotalStat" class="metric-stat-value">--</div>
+                </div>
+                <div class="metric-stat">
+                  <div class="metric-stat-label">TX Total</div>
+                  <div id="networkTxTotalStat" class="metric-stat-value">--</div>
+                </div>
             </div>
           </article>
           <article class="metric-card">
@@ -1083,6 +1091,8 @@
       const downEl = document.getElementById("networkDownStat");
       const upEl = document.getElementById("networkUpStat");
       const totalEl = document.getElementById("networkTotalStat");
+      const rxTotalEl = document.getElementById("networkRxTotalStat");
+      const txTotalEl = document.getElementById("networkTxTotalStat");
 
       if (!network) {
         valueEl.innerText = "--";
@@ -1099,6 +1109,8 @@
       downEl.innerText = formatMbps(network.rx_mbps, 1);
       upEl.innerText = formatMbps(network.tx_mbps, 1);
       totalEl.innerText = formatBytes((Number(network.rx_bytes) || 0) + (Number(network.tx_bytes) || 0));
+      rxTotalEl.innerText = formatBytes((Number(network.rx_gb) || 0) * 1e9);
+      txTotalEl.innerText = formatBytes((Number(network.tx_gb) || 0) * 1e9);
     }
 
     function getStateClass(container) {

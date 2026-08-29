@@ -1,2 +1,6 @@
 cline:
     http://192.168.68.123:1919
+
+models:
+    gpt-oss-20b
+    Qwen3.6-35B-A3B-NVFP4

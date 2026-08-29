@@ -18,7 +18,7 @@
        "extensions": [
          "saoudrizwan.claude-dev",
          "ms-python.python",
-         "rooveterinaryinc.roo-cline"
+        //  "rooveterinaryinc.roo-cline"
        ]
     }
   }

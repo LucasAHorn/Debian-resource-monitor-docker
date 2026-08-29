@@ -77,18 +77,22 @@ def disk_usage():
 
 def network_totals():
     totals = {"interface_count": 0, "rx_bytes": 0, "tx_bytes": 0}
-    with open("/proc/net/dev", encoding="utf-8") as source:
-        for line in source.read().strip().splitlines()[2:]:
-            interface, _, values = line.partition(":")
-            fields = values.split()
-            if not interface.strip() or interface.strip() == "lo" or len(fields) < 16:
+    try:
+        for iface in os.listdir("/sys/class/net"):
+            if iface == "lo":
                 continue
+            rx_path = f"/sys/class/net/{iface}/statistics/rx_bytes"
+            tx_path = f"/sys/class/net/{iface}/statistics/tx_bytes"
             try:
+                rx_bytes = int(open(rx_path, encoding="utf-8").read().strip())
+                tx_bytes = int(open(tx_path, encoding="utf-8").read().strip())
                 totals["interface_count"] += 1
-                totals["rx_bytes"] += int(fields[0])
-                totals["tx_bytes"] += int(fields[8])
-            except ValueError:
+                totals["rx_bytes"] += rx_bytes
+                totals["tx_bytes"] += tx_bytes
+            except (OSError, ValueError):
                 continue
+    except OSError:
+        pass
     return totals
 
 
