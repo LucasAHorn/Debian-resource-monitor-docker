@@ -15,10 +15,11 @@
   ],
   "customizations": {
     "vscode": {
-      "extensions": [
-        "saoudrizwan.claude-dev",
-        "ms-python.python"
-      ]
+       "extensions": [
+         "saoudrizwan.claude-dev",
+         "ms-python.python",
+         "rooveterinaryinc.roo-cline"
+       ]
     }
   }
 }
