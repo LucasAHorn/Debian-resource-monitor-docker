@@ -862,6 +862,18 @@
       return `${formatGb(used)} GB / ${formatGb(total)} GB`;
     }
 
+    function formatDiskSpace(value) {
+      const numericValue = Number(value);
+
+      if (!Number.isFinite(numericValue)) {
+        return "--";
+      }
+
+      return numericValue >= 1000
+        ? `${(numericValue / 1000).toFixed(2)} TB`
+        : `${numericValue.toFixed(2)} GB`;
+    }
+
     function formatBytes(bytes) {
       const numericValue = Number(bytes);
 
@@ -1149,7 +1161,7 @@
         row.innerHTML = `
           <div style="flex: 1; min-width: 0;">
             <div class="row-title">${escapeHtml(disk.path)}</div>
-            <div class="row-subtitle">${escapeHtml(formatGb(disk.used_gb))} GB used of ${escapeHtml(formatGb(disk.total_gb))} GB, ${escapeHtml(formatGb(disk.available_gb))} GB remaining</div>
+            <div class="row-subtitle">${escapeHtml(formatDiskSpace(disk.used_gb))} used of ${escapeHtml(formatDiskSpace(disk.total_gb))}, ${escapeHtml(formatDiskSpace(disk.available_gb))} remaining</div>
             <div class="usage-bar"><div class="${fillClass(usedPercent)}" style="width: ${usedPercent}%"></div></div>
           </div>
           <div class="status-chip ${usedPercent < 80 ? "running" : usedPercent < 90 ? "" : "stopped"}">
