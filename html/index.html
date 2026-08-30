@@ -542,33 +542,6 @@
             <div class="usage-bar"><div id="ramBar" class="usage-fill" style="width: 0%"></div></div>
           </article>
           <article class="metric-card">
-            <div class="metric-label">Network Monitor</div>
-            <div id="networkValue" class="metric-value">--</div>
-            <div id="networkDetail" class="metric-detail">Waiting for network data</div>
-            <div class="metric-stats">
-              <div class="metric-stat">
-                <div class="metric-stat-label">Down</div>
-                <div id="networkDownStat" class="metric-stat-value">--</div>
-              </div>
-              <div class="metric-stat">
-                <div class="metric-stat-label">Up</div>
-                <div id="networkUpStat" class="metric-stat-value">--</div>
-              </div>
-              <div class="metric-stat">
-                <div class="metric-stat-label">Total</div>
-                <div id="networkTotalStat" class="metric-stat-value">--</div>
-              </div>
-                <div class="metric-stat">
-                  <div class="metric-stat-label">RX Total</div>
-                  <div id="networkRxTotalStat" class="metric-stat-value">--</div>
-                </div>
-                <div class="metric-stat">
-                  <div class="metric-stat-label">TX Total</div>
-                  <div id="networkTxTotalStat" class="metric-stat-value">--</div>
-                </div>
-            </div>
-          </article>
-          <article class="metric-card">
             <div class="metric-label">GPU Summary</div>
             <div id="gpuValue" class="metric-value">--%</div>
             <div id="gpuDetail" class="metric-detail">Waiting for GPU data</div>
@@ -752,21 +725,7 @@
               available_gb: toFiniteNumber(disk.available_gb)
             })).filter(disk => disk.path)
           : [],
-        gpu: normalizeGpuSummary(payload.gpu),
-        network: isPlainObject(payload.network)
-          ? {
-              interface_count: toFiniteNumber(payload.network.interface_count),
-              rx_bytes: toFiniteNumber(payload.network.rx_bytes),
-              tx_bytes: toFiniteNumber(payload.network.tx_bytes),
-              rx_bytes_per_sec: toFiniteNumber(payload.network.rx_bytes_per_sec),
-              tx_bytes_per_sec: toFiniteNumber(payload.network.tx_bytes_per_sec),
-              rx_mbps: toFiniteNumber(payload.network.rx_mbps),
-              tx_mbps: toFiniteNumber(payload.network.tx_mbps),
-              total_mbps: toFiniteNumber(payload.network.total_mbps),
-              rx_gb: toFiniteNumber(payload.network.rx_gb),
-              tx_gb: toFiniteNumber(payload.network.tx_gb)
-            }
-          : null
+        gpu: normalizeGpuSummary(payload.gpu)
       };
     }
 
@@ -1085,34 +1044,6 @@
       memEl.innerText = `${formatPercent(gpu.average_memory_util_percent, 0)}%`;
     }
 
-    function renderNetworkSummary(network) {
-      const valueEl = document.getElementById("networkValue");
-      const detailEl = document.getElementById("networkDetail");
-      const downEl = document.getElementById("networkDownStat");
-      const upEl = document.getElementById("networkUpStat");
-      const totalEl = document.getElementById("networkTotalStat");
-      const rxTotalEl = document.getElementById("networkRxTotalStat");
-      const txTotalEl = document.getElementById("networkTxTotalStat");
-
-      if (!network) {
-        valueEl.innerText = "--";
-        detailEl.innerText = "No network data available.";
-        downEl.innerText = "--";
-        upEl.innerText = "--";
-        totalEl.innerText = "--";
-        return;
-      }
-
-      valueEl.innerText = formatMbps(network.total_mbps, 1);
-      detailEl.innerText =
-        `${network.interface_count || 0} active interface${network.interface_count === 1 ? "" : "s"} | aggregate non-loopback traffic`;
-      downEl.innerText = formatMbps(network.rx_mbps, 1);
-      upEl.innerText = formatMbps(network.tx_mbps, 1);
-      totalEl.innerText = formatBytes((Number(network.rx_bytes) || 0) + (Number(network.tx_bytes) || 0));
-      rxTotalEl.innerText = formatBytes((Number(network.rx_gb) || 0) * 1e9);
-      txTotalEl.innerText = formatBytes((Number(network.tx_gb) || 0) * 1e9);
-    }
-
     function getStateClass(container) {
       if (container.state === "paused" || (container.status || "").includes("Paused")) {
         return "paused";
@@ -1152,21 +1083,19 @@
         `${formatGb(data.ram_used_gb)} GB used of ${formatGb(data.ram_total_gb)} GB`;
       updateBar("ramBar", data.ram_percent);
 
-      renderNetworkSummary(data.network);
       renderGpuSummary(data.gpu);
     }
 
     function renderSystemUnavailable() {
       latestSystemData = null;
-      ["cpuValue", "ramValue", "networkValue", "gpuValue"].forEach(id => {
+      ["cpuValue", "ramValue", "gpuValue"].forEach(id => {
         document.getElementById(id).innerText = "--";
       });
       document.getElementById("cpuDetail").innerText = "Resource snapshot unavailable.";
       document.getElementById("ramDetail").innerText = "Resource snapshot unavailable.";
-      document.getElementById("networkDetail").innerText = "No network data available.";
       document.getElementById("gpuDetail").innerText = "GPU data unavailable.";
       ["cpuBar", "ramBar"].forEach(id => { document.getElementById(id).style.width = "0%"; });
-      ["networkDownStat", "networkUpStat", "networkTotalStat", "gpuUtilStat", "gpuVramStat", "gpuMemStat"].forEach(id => {
+      ["gpuUtilStat", "gpuVramStat", "gpuMemStat"].forEach(id => {
         document.getElementById(id).innerText = "--";
       });
       renderDisks([]);

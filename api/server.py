@@ -58,57 +58,68 @@ def cpu_usage(window=1):
 
 
 def disk_usage():
-    targets = [("/host-root", "/"), ("/srv/fast", "/srv/fast"), ("/srv/storage", "/srv/storage")]
     try:
-        output = run_command(["df", "-kP", *(path for path, _ in targets)]).stdout
+        devices = json.loads(run_command(
+            ["lsblk", "--json", "--output", "NAME,TYPE,MOUNTPOINTS"]
+        ).stdout).get("blockdevices", [])
         result = []
-        for line, (_, label) in zip(output.strip().splitlines()[1:], targets):
-            parts = line.split()
-            if len(parts) < 6:
-                continue
-            total, used, available = (int(parts[index]) * 1024 for index in (1, 2, 3))
-            result.append({"path": label, "percent_used": number(parts[4].rstrip("%")),
-                           "used_gb": rounded(used / 1e9), "total_gb": rounded(total / 1e9),
-                           "available_gb": rounded(available / 1e9)})
-        return result
-    except (OSError, subprocess.CalledProcessError, ValueError):
-        return []
+        seen_filesystems = set()
 
-
-def network_totals():
-    totals = {"interface_count": 0, "rx_bytes": 0, "tx_bytes": 0}
-    try:
-        for iface in os.listdir("/sys/class/net"):
-            if iface == "lo":
-                continue
-            rx_path = f"/sys/class/net/{iface}/statistics/rx_bytes"
-            tx_path = f"/sys/class/net/{iface}/statistics/tx_bytes"
+        def canonical_mountpoint(path):
+            """Return the host-facing mountpoint for a container bind mount."""
             try:
-                rx_bytes = int(open(rx_path, encoding="utf-8").read().strip())
-                tx_bytes = int(open(tx_path, encoding="utf-8").read().strip())
-                totals["interface_count"] += 1
-                totals["rx_bytes"] += rx_bytes
-                totals["tx_bytes"] += tx_bytes
+                device_id = os.stat(path).st_dev
+                major, minor = os.major(device_id), os.minor(device_id)
+                candidates = []
+                with open("/proc/self/mountinfo", encoding="utf-8") as mounts:
+                    for line in mounts:
+                        fields = line.split(" - ", 1)[0].split()
+                        if len(fields) < 6 or fields[2] != f"{major}:{minor}" or fields[3] != "/":
+                            continue
+                        candidates.append(fields[4].replace("\\040", " ").replace("\\011", "\t"))
+                if candidates:
+                    return min(candidates, key=len)
             except (OSError, ValueError):
+                pass
+            return path
+
+        def mounted_paths(device):
+            paths = list(device.get("mountpoints") or [])
+            for child in device.get("children") or []:
+                paths.extend(mounted_paths(child))
+            return paths
+
+        for device in devices:
+            # lsblk calls physical discs "disk"; accept "disc" as well for
+            # platforms that use that spelling.
+            if device.get("type") not in {"disk", "disc"}:
                 continue
-    except OSError:
-        pass
-    return totals
 
-
-def network_usage(window=1):
-    try:
-        start = network_totals()
-        time.sleep(window)
-        end = network_totals()
-        rx = max(0, end["rx_bytes"] - start["rx_bytes"]) / window
-        tx = max(0, end["tx_bytes"] - start["tx_bytes"]) / window
-        return {**end, "rx_bytes_per_sec": rounded(rx), "tx_bytes_per_sec": rounded(tx),
-                "rx_mbps": rounded(rx * 8 / 1e6), "tx_mbps": rounded(tx * 8 / 1e6),
-                "total_mbps": rounded((rx + tx) * 8 / 1e6),
-                "rx_gb": rounded(end["rx_bytes"] / 1e9), "tx_gb": rounded(end["tx_bytes"] / 1e9)}
-    except (OSError, ValueError):
-        return None
+            for path in sorted(set(mounted_paths(device)), key=len):
+                if not path or path == "[SWAP]" or not os.path.isdir(path):
+                    continue
+                # The host root is bind-mounted here so df measures the host
+                # filesystem rather than the API container's overlay.
+                if path == "/" and os.path.isdir("/host-root"):
+                    path = "/host-root"
+                try:
+                    line = run_command(["df", "-kP", "--", path]).stdout.strip().splitlines()[-1]
+                    parts = line.split()
+                    if len(parts) < 6:
+                        continue
+                    filesystem = parts[0]
+                    if filesystem in seen_filesystems:
+                        continue
+                    seen_filesystems.add(filesystem)
+                    total, used, available = (int(parts[index]) * 1024 for index in (1, 2, 3))
+                except (OSError, subprocess.CalledProcessError, IndexError, ValueError):
+                    continue
+                result.append({"path": canonical_mountpoint(path), "percent_used": number(parts[4].rstrip("%")),
+                               "used_gb": rounded(used / 1e9), "total_gb": rounded(total / 1e9),
+                               "available_gb": rounded(available / 1e9)})
+        return result
+    except (OSError, subprocess.CalledProcessError, ValueError, json.JSONDecodeError):
+        return []
 
 
 def gpu_metrics():
@@ -173,7 +184,7 @@ def resource_snapshot():
             "ram_percent": round((total - free) / total * 100) if total else 0,
             "ram_used_gb": rounded((total - free) / 1e9), "ram_total_gb": rounded(total / 1e9),
             "ram_used_bytes": total - free, "ram_total_bytes": total,
-            "disks": disk_usage(), "gpu": gpu_metrics(), "network": network_usage()}
+            "disks": disk_usage(), "gpu": gpu_metrics()}
 
 
 class Handler(BaseHTTPRequestHandler):

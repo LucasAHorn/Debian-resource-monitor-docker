@@ -1,1 +1,1 @@
-curl http://192.168.68.123:1919/v1/models
+curl http://192.168.68.123:1919/v1/modcodeels

@@ -4,7 +4,7 @@
 
  This is a small Docker Compose resource monitor. nginx serves the static
  dashboard on port 8080 and proxies `/api/` requests to the Python API on port
- 5000. The API reports host CPU, memory, disks, network traffic, optional GPU
+ 5000. The API reports host CPU, memory, disks, optional GPU
  metrics, and Docker container status/actions. GPU metrics are optional: a
  host without NVIDIA hardware must still be able to run the API and render
  the rest of the dashboard.
@@ -24,8 +24,7 @@
 ## Operational expectations
 
  - Missing NVIDIA tools or hardware is a normal degraded state. GPU fields
-   should be null/unavailable while CPU, memory, disk, and network data remain
-   usable.
+   should be null/unavailable while CPU, memory, and disk data remain usable.
  - A missing Docker daemon/CLI or malformed API response is also a degraded
    state. The browser should show an actionable status message and keep the
    rest of the page usable.
