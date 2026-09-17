@@ -1,44 +1,62 @@
 # Gmail Summary Script
 
-This script connects to your Gmail account, retrieves emails since a specified timestamp, and uses an AI model to generate a short summary of the most important emails.
+Summarizes your most important Gmail messages using a local AI model.
 
-## Prerequisites
+## Setup
 
-- Python 3.9+
-- Gmail API credentials (OAuth2).  
-  - Create OAuth client ID in Google Cloud Console.  
-  - Obtain a **refresh token** for the Gmail scope (`https://www.googleapis.com/auth/gmail.readonly`).  
-  - Export the following environment variables before running the script:
-    - `GOOGLE_CLIENT_ID`
-    - `GOOGLE_CLIENT_SECRET`
-    - `GOOGLE_REFRESH_TOKEN`
+1. Copy the example env file and fill in your credentials:
+   ```bash
+   cp .env.example .env
+   ```
 
-- The AI model service running at `http://192.168.68.123:1919`.  
-  The endpoint should accept a JSON payload:
-  ```json
-  {
-    "prompt": "Summarize the following email content:\n\n<email_text>"
-  }
-  ```
-  and return a JSON object with a `summary` field.
+2. Edit `.env` with your Gmail credentials:
+   - **GMAIL_EMAIL**: Your Gmail address
+   - **GMAIL_APP_PASSWORD**: An [App Password](https://myaccount.google.com/apppasswords) (NOT your regular password)
 
-## Installation
-
-```bash
-pip install -r gmail_summary/requirements.txt
-```
+3. Install dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
 
 ## Usage
 
 ```bash
-python gmail_summary/summarize_emails.py --since 2024-01-01T00:00:00Z
+# Default: last 7 days, up to 30 emails
+python gmail_summary.py
+
+# Last 1 day
+python gmail_summary.py --days 1
+
+# Last 6 hours
+python gmail_summary.py --hours 6
+
+# Specific time
+python gmail_summary.py --since "2024-09-15 09:00"
+
+# Fetch 10, summarize top 5
+python gmail_summary.py --max 10 --top 5
+
+# Preview emails without calling AI
+python gmail_summary.py --dry-run
+
+# Output as JSON
+python gmail_summary.py --json
 ```
 
-The script will:
-1. Fetch unread or starred emails after the provided timestamp.  
-2. Send each email's body to the AI model for summarization.  
-3. Print the summaries to stdout.
+## How It Works
 
----
+1. **Fetches** emails from Gmail via IMAP (starred + unread)
+2. **Scores** each email by importance (recency, subject keywords, attachments, body length)
+3. **Summarizes** the top emails using the local AI model at `http://192.168.68.123:1919`
 
-Enjoy!
+## AI Model
+
+- Uses the OpenAI-compatible API at the configured endpoint
+- Default: `Qwen3.6-35B-A3B-NVFP4` via FreeToken
+- Configurable via `AI_BASE_URL` and `AI_MODEL` in `.env`
+
+## Gmail Setup
+
+1. Enable 2-Step Verification on your Google account
+2. Generate an App Password: https://myaccount.google.com/apppasswords
+3. Use the 16-character app password in `.env`
